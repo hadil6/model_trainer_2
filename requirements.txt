@@ -1,0 +1,45 @@
+# ── LangGraph / LangChain stack ────────────────────────────────────────────
+langgraph>=0.2.50
+langchain>=0.3.0
+langchain-core>=0.3.0
+langchain-anthropic>=0.3.0
+langchain-openai>=0.2.0
+langchain-mcp-adapters>=0.1.0
+langsmith>=0.1.100
+
+# ── MCP / FastMCP ─────────────────────────────────────────────────────────
+mcp[cli]>=1.2.0
+
+# ── LLM providers ─────────────────────────────────────────────────────────
+anthropic>=0.40.0
+openai>=1.50.0
+
+# ── Data & profiling ──────────────────────────────────────────────────────
+pandas>=2.0.0
+numpy>=1.26.0
+marker-pdf>=1.10.0
+chardet>=5.0.0
+pydantic>=2.8.0
+pydantic-settings>=2.4.0
+polars>=1.0.0
+openpyxl>=3.1.0
+xlrd>=2.0.1
+
+# ── Tokenization / embeddings / metrics ──────────────────────────────────
+transformers>=4.44.0
+sentence-transformers>=3.0.0
+rouge-score>=0.1.2
+
+# ── Hyperparameter optimization ──────────────────────────────────────────────
+optuna>=3.0.0
+
+# ── Runtime utilities ─────────────────────────────────────────────────────
+python-dotenv>=1.0.0
+typer>=0.12.0
+rich>=13.7.0
+
+# ── Web (FastAPI server for the React frontend) ───────────────────────────
+fastapi>=0.115.0
+uvicorn[standard]>=0.30.0
+sse-starlette>=2.1.0
+python-multipart>=0.0.9

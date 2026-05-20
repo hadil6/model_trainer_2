@@ -1,0 +1,9 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(python -c ' *)",
+      "Bash(pip show *)",
+      "Bash(dir \"c:\\\\Users\\\\ASUS\\\\model_trainer\" /b)"
+    ]
+  }
+}

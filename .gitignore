@@ -1,0 +1,22 @@
+# Environment Python
+venv/
+env/
+
+# Cache Python
+__pycache__/
+*.pyc
+
+# Artifacts / outputs
+artifacts/
+artifacts/
+
+# Logs
+*.log
+
+# IDE
+.vscode/
+.idea/
+
+# OS
+.DS_Store
+Thumbs.db
