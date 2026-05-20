@@ -32,6 +32,7 @@ from agents.data_agent.mcp_server.profiling import (
     tool_clean_text,
     tool_merge_corpus,
     tool_profile_file,
+    tool_release_gpu,
     tool_review_ocr_relevance,
     tool_summarize_file,
 )
@@ -85,6 +86,7 @@ async def _async_evaluate_and_refine_qa(job_id: str, task: str, sample_size: int
 
 
 # Register all tools on the single app instance
+mcp.add_tool(tool_release_gpu,              name="release_gpu")
 mcp.add_tool(_async_profile_file,           name="profile_file_tool")
 mcp.add_tool(_async_summarize_file,         name="summarize_file")
 mcp.add_tool(tool_clean_text,               name="clean_text_tool")

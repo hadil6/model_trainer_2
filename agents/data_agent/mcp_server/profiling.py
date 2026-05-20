@@ -25,6 +25,54 @@ from data.feasibility import check_prompt_vagueness, evaluate_feasibility
 logger = logging.getLogger(__name__)
 
 
+def tool_release_gpu(job_id: str) -> dict:
+    """Release GPU memory held by marker-pdf and sentence-transformer inside the MCP server process.
+
+    Call this after all files have been profiled (end of Phase 1) so the GPU
+    is free for SWIFT training. Safe to call at any time.
+    """
+    import gc
+    freed: list[str] = []
+    errors: list[str] = []
+
+    # Release marker-pdf models
+    try:
+        from data.profilers.pdf_profiler import release_marker_models
+        release_marker_models()
+        freed.append("marker_models")
+    except Exception as exc:
+        errors.append(f"marker: {exc}")
+
+    # Release sentence transformer
+    try:
+        from data.model_zoo.embeddings import release_sentence_transformer
+        release_sentence_transformer()
+        freed.append("sentence_transformer")
+    except Exception as exc:
+        errors.append(f"sentence_transformer: {exc}")
+
+    # Flush CUDA cache
+    try:
+        import torch
+        gc.collect()
+        if torch.cuda.is_available():
+            torch.cuda.empty_cache()
+            try:
+                torch.cuda.ipc_collect()
+            except Exception:
+                pass
+            free_mb = round(torch.cuda.mem_get_info()[0] / 1024 ** 2, 1)
+        else:
+            free_mb = None
+        freed.append("cuda_cache")
+    except Exception as exc:
+        errors.append(f"cuda_flush: {exc}")
+        free_mb = None
+
+    logger.info("release_gpu job=%s freed=%s free_vram_mb=%s errors=%s", job_id, freed, free_mb, errors)
+    return {"freed": freed, "free_vram_mb": free_mb, "errors": errors}
+
+
 def tool_profile_file(job_id: str, filename: str) -> dict:
     """Profile an uploaded file. Returns file_kind, row/word counts, warnings, risk_flags.
 

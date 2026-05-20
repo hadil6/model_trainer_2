@@ -43,25 +43,32 @@ For EACH uploaded file (repeat steps 1-4 for every filename in the list):
   3. clean_text_tool(job_id, filename)              [PDF and TXT only — skip for CSV/XLSX]
   4. review_ocr_relevance(job_id, filename, domain) [PDF only, if OCR pages exist — skip otherwise]
 
+── PHASE 1b : Free GPU after all profiling done ──────────────────────────────
+
+  5. release_gpu(job_id)
+     → Frees marker-pdf and sentence-transformer VRAM inside the MCP server.
+     → Call ONCE after ALL files have completed steps 1-4.
+     → Critical: ensures the GPU is free before SWIFT training starts.
+
 ── PHASE 2 : Analyse the dataset as a whole ──────────────────────────────────
 
-  5. detect_domain(job_id)                          [once, after ALL files profiled]
-  6. assess_readiness(job_id, task, user_prompt=user_goal)
+  6. detect_domain(job_id)                          [once, after ALL files profiled]
+  7. assess_readiness(job_id, task, user_prompt=user_goal)
      → Pass user_goal from the state snapshot as user_prompt (NOT task).
      → If verdict == "BLOCKED": call finish immediately.
-  7. check_coherence(job_id, task)
+  8. check_coherence(job_id, task)
      → If score < 0.6: call finish immediately.
 
 ── PHASE 3 : Build the unified corpus ────────────────────────────────────────
 
-  8. merge_corpus(job_id)
+  9. merge_corpus(job_id)
      → Merges ALL cleaned/extracted texts into artifacts/{job_id}/merged_corpus.txt
      → This single file is the sole input for QA generation.
 
 ── PHASE 4 : Generate pairs from the unified corpus (two passes) ─────────────
 
-  9. generate_qa(job_id, filename="merged_corpus", task, pass_num=1, model_id=target_model)
-  10. generate_qa(job_id, filename="merged_corpus", task, pass_num=2, model_id=target_model)
+  10. generate_qa(job_id, filename="merged_corpus", task, pass_num=1, model_id=target_model)
+  11. generate_qa(job_id, filename="merged_corpus", task, pass_num=2, model_id=target_model)
      → Always use filename="merged_corpus" — never generate per original file.
      → Always pass model_id=target_model so the correct dataset format is used.
      → For task="summarization": generates (document→summary) pairs with larger chunks (2000 chars).
@@ -69,14 +76,14 @@ For EACH uploaded file (repeat steps 1-4 for every filename in the list):
 
 ── PHASE 5 : Refine, validate, export ────────────────────────────────────────
 
-  11. evaluate_and_refine_qa(job_id, task, sample_size=20)
-  12. deduplicate_qa(job_id)
-  13. evaluate_readiness(job_id, task, target_peft="qlora", target_model=target_model)
-  14. auto_fill_qa(job_id, target_model, task, target_peft="qlora", model_id=target_model)
+  12. evaluate_and_refine_qa(job_id, task, sample_size=20)
+  13. deduplicate_qa(job_id)
+  14. evaluate_readiness(job_id, task, target_peft="qlora", target_model=target_model)
+  15. auto_fill_qa(job_id, target_model, task, target_peft="qlora", model_id=target_model)
       → Only if readiness verdict is NOT_READY or READY_WITH_WARNINGS (insufficient pairs).
       → Skip if verdict is READY.
       → Always pass model_id=target_model to ensure consistent dataset format.
-  15. finish(job_id, task, target_model)
+  16. finish(job_id, task, target_model)
 
 PLANNING RULES:
 - Call ONE tool at a time.
@@ -371,7 +378,8 @@ async def run_data_agent(inputs: DataAgentInput) -> dict:
         "error":  None,
     }
 
-    final_state = await compiled.ainvoke(initial)
+    max_iter = max(30, 6 * len(inputs["filenames"]) + 15)
+    final_state = await compiled.ainvoke(initial, config={"recursion_limit": max_iter * 2 + 10})
     return final_state.get("result") or {
         "job_id": inputs["job_id"],
         "verdict": "incomplete",
