@@ -151,12 +151,18 @@ def cleanup_vram(label: str = "cleanup") -> dict:
     except Exception as exc:
         report["errors"].append(f"cuda_flush: {type(exc).__name__}: {exc}")
 
-    # ── 3. Also try to release the sentence-transformer if loaded ────────────
+    # ── 3. Release heavy inference models that are no longer needed ──────────
     try:
         from data.model_zoo.embeddings import release_sentence_transformer
         release_sentence_transformer()
     except Exception as exc:
         report["errors"].append(f"st_release: {type(exc).__name__}: {exc}")
+
+    try:
+        from data.profilers.pdf_profiler import release_marker_models
+        release_marker_models()
+    except Exception as exc:
+        report["errors"].append(f"marker_release: {type(exc).__name__}: {exc}")
 
     # ── 4. Wait for the driver (WDDM on Windows is slow) ─────────────────────
     time.sleep(2)

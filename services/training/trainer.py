@@ -92,7 +92,16 @@ def run_training(
         rationale,
     )
 
-    # ── Step 3: Run SWIFT ─────────────────────────────────────────────────────
+    # ── Step 3: Free GPU before handing it to SWIFT ──────────────────────────
+    # marker-pdf and sentence-transformer may still hold VRAM from the data
+    # preparation phase. Release them now so SWIFT has the full GPU.
+    try:
+        from services.vram_cleanup import cleanup_vram
+        cleanup_vram(label="before_swift_training")
+    except Exception as _vram_exc:
+        logger.warning("pre-training VRAM cleanup failed (non-fatal): %s", _vram_exc)
+
+    # ── Step 4: Run SWIFT ─────────────────────────────────────────────────────
     result = swift_runner.run(
         model_id=model_id,
         peft_method=final_peft,

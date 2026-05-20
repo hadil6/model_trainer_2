@@ -19,6 +19,34 @@ logger = logging.getLogger(__name__)
 _marker_models = None
 
 
+def release_marker_models() -> None:
+    """Delete cached marker-pdf models and free their VRAM.
+
+    Call this after all PDFs have been profiled so the GPU is free for training.
+    """
+    global _marker_models
+    import gc
+    if _marker_models is None:
+        return
+    try:
+        import torch
+        for obj in _marker_models.values():
+            try:
+                if hasattr(obj, "to"):
+                    obj.to("cpu")
+            except Exception:
+                pass
+        del _marker_models
+        _marker_models = None
+        gc.collect()
+        if torch.cuda.is_available():
+            torch.cuda.empty_cache()
+        logger.info("marker-pdf models released from GPU.")
+    except Exception as exc:
+        logger.warning("release_marker_models failed: %s", exc)
+        _marker_models = None
+
+
 def _get_marker_models() -> dict:
     global _marker_models
     if _marker_models is None:

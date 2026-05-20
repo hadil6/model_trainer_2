@@ -161,14 +161,19 @@ async def create_run(
         cleanup_report.get("vram_after_mb"),
     )
 
-    # Auto-detect VRAM — use total_gb for model selection (training will be the
-    # sole GPU consumer; available_gb reflects current desktop/OS usage which
-    # is released once training starts)
+    # Use available VRAM minus a headroom reserve to account for persistent
+    # processes that share the GPU (MCP server, sentence transformer, profiling
+    # tools, OS overhead). Using total_gb causes OOM when those processes don't
+    # release VRAM before training starts.
+    _OVERHEAD_RESERVE_GB = 3
     from services.gpu_probe import detect_vram
     gpu_info = detect_vram()
     if gpu_info is not None:
-        gpu_vram_gb = gpu_info.total_gb
-        logger.info("GPU auto-detected: %s — using %d GB total VRAM for model selection", gpu_info.name, gpu_vram_gb)
+        gpu_vram_gb = max(1, int(gpu_info.available_gb) - _OVERHEAD_RESERVE_GB)
+        logger.info(
+            "GPU auto-detected: %s — total=%.1fGB available=%.1fGB reserved=%dGB → budget=%dGB for model selection",
+            gpu_info.name, gpu_info.total_gb, gpu_info.available_gb, _OVERHEAD_RESERVE_GB, gpu_vram_gb,
+        )
     else:
         logger.info("No GPU detected — using user-supplied gpu_vram_gb=%d", gpu_vram_gb)
 
