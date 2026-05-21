@@ -7,6 +7,7 @@ import {
   fetchLossHistory, fetchTrainingImages,
   fetchRunResult, confirmAction, uploadAdditionalFiles,
   fetchGpuInfo,
+  loadChatModel, sendChatMessage, unloadChatModel,
   reportDownloadUrl, modelDownloadUrl,
   type RunEvent, type DatasetResponse,
   type TrainingReport, type EvalReport,
@@ -688,6 +689,231 @@ function DecisionJournalCard({ journal, isExpert }: { journal: DecisionJournalEn
   );
 }
 
+// ── Chat Panel ────────────────────────────────────────────────────────────────
+
+type ChatLoadState = "idle" | "loading" | "ready" | "error";
+
+interface ChatMsg { role: "user" | "assistant"; content: string; }
+
+function ChatPanel({ runId, isExpert }: { runId: string; isExpert: boolean }) {
+  const [loadState,   setLoadState]   = useState<ChatLoadState>("idle");
+  const [messages,    setMessages]    = useState<ChatMsg[]>([]);
+  const [input,       setInput]       = useState("");
+  const [generating,  setGenerating]  = useState(false);
+  const [device,      setDevice]      = useState<string | null>(null);
+  const [freeVramGb,  setFreeVramGb]  = useState<number | null>(null);
+  const [error,       setError]       = useState("");
+  const bottomRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    bottomRef.current?.scrollIntoView({ behavior: "smooth" });
+  }, [messages, generating]);
+
+  async function onLoad() {
+    setLoadState("loading");
+    setError("");
+    try {
+      const res = await loadChatModel(runId);
+      setDevice(res.device);
+      setFreeVramGb((res as Record<string, unknown>).free_vram_gb as number ?? null);
+      setLoadState("ready");
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err));
+      setLoadState("error");
+    }
+  }
+
+  async function onUnload() {
+    await unloadChatModel(runId);
+    setLoadState("idle");
+    setMessages([]);
+    setDevice(null);
+    setError("");
+  }
+
+  async function onSend() {
+    const msg = input.trim();
+    if (!msg || generating) return;
+    setInput("");
+    setMessages(prev => [...prev, { role: "user", content: msg }]);
+    setGenerating(true);
+    setError("");
+    try {
+      const reply = await sendChatMessage(runId, msg);
+      setMessages(prev => [...prev, { role: "assistant", content: reply }]);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setGenerating(false);
+    }
+  }
+
+  function onKey(e: React.KeyboardEvent<HTMLTextAreaElement>) {
+    if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); onSend(); }
+  }
+
+  // ── idle state: show "Tester le modèle" button ──────────────────────────────
+  if (loadState === "idle" || loadState === "error") {
+    return (
+      <div className="card">
+        <div className="card-header">
+          <h2><span className="card-icon">💬</span>Tester le modèle</h2>
+        </div>
+        {!isExpert && (
+          <div className="novice-guide-box">
+            <strong>Discutez avec votre modèle !</strong> Cliquez sur le bouton ci-dessous pour charger
+            votre modèle fine-tuné et lui poser des questions directement. C'est le meilleur moyen de
+            juger sa qualité par vous-même.
+          </div>
+        )}
+        <p className="muted-text" style={{ marginBottom: 16 }}>
+          Le modèle sera chargé en VRAM. Vous pourrez lui poser des questions librement,
+          puis le décharger pour libérer la mémoire GPU.
+        </p>
+        {error && <div className="error-box" style={{ marginBottom: 14 }}>⚠ {error}</div>}
+        <button className="action-btn action-accent" onClick={onLoad} style={{ fontSize: 14 }}>
+          ▶ Charger le modèle et démarrer le chat
+        </button>
+      </div>
+    );
+  }
+
+  // ── loading state ───────────────────────────────────────────────────────────
+  if (loadState === "loading") {
+    return (
+      <div className="card">
+        <div className="card-header">
+          <h2><span className="card-icon">💬</span>Tester le modèle</h2>
+        </div>
+        <div style={{ display: "flex", alignItems: "center", gap: 14, padding: "20px 0" }}>
+          <div className="spinner" style={{ width: 24, height: 24, border: "3px solid rgba(124,58,237,0.15)", borderTopColor: "var(--primary)", flexShrink: 0 }} />
+          <div>
+            <div style={{ fontWeight: 700, marginBottom: 4 }}>Chargement du modèle en mémoire…</div>
+            <div className="muted-text">Cette opération peut prendre 1 à 3 minutes selon la taille du modèle.</div>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  // ── ready state: chat interface ─────────────────────────────────────────────
+  return (
+    <div className="card">
+      <div className="card-header">
+        <h2><span className="card-icon">💬</span>Chat avec le modèle fine-tuné</h2>
+        <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+          <span style={{
+            fontSize: 12, padding: "3px 10px", borderRadius: 20, fontWeight: 700,
+            background: device === "gpu" ? "#E6F7F1" : "#FEF8E7",
+            color: device === "gpu" ? "var(--ok)" : "var(--warn)",
+            border: `1px solid ${device === "gpu" ? "#BBF7D0" : "#FCD34D"}`,
+          }}>
+            {device === "gpu" ? "⚡ GPU" : "🖥 CPU"}
+            {freeVramGb !== null && (
+              <span style={{ fontWeight: 400, marginLeft: 5, opacity: 0.8 }}>
+                ({freeVramGb.toFixed(1)} Go libres au chargement)
+              </span>
+            )}
+          </span>
+          <button
+            className="action-btn action-secondary"
+            style={{ fontSize: 12, padding: "4px 12px" }}
+            onClick={onUnload}
+          >
+            ⏹ Décharger
+          </button>
+        </div>
+      </div>
+
+      {!isExpert && messages.length === 0 && (
+        <div className="novice-guide-box" style={{ marginBottom: 14 }}>
+          Posez une question à votre modèle. Évaluez la pertinence et la précision de ses réponses
+          par rapport à vos documents originaux.
+        </div>
+      )}
+
+      {/* Messages */}
+      <div style={{
+        minHeight: 200, maxHeight: 420, overflowY: "auto",
+        border: "1px solid var(--border)", borderRadius: 10,
+        padding: "12px 14px", marginBottom: 14,
+        background: "var(--panel)", display: "flex", flexDirection: "column", gap: 10,
+      }}>
+        {messages.length === 0 && (
+          <div style={{ color: "var(--muted)", fontSize: 13, textAlign: "center", margin: "auto" }}>
+            Aucun message pour l'instant. Posez votre première question ci-dessous.
+          </div>
+        )}
+        {messages.map((m, i) => (
+          <div key={i} style={{
+            display: "flex",
+            justifyContent: m.role === "user" ? "flex-end" : "flex-start",
+          }}>
+            <div style={{
+              maxWidth: "80%", padding: "9px 14px", borderRadius: 12,
+              fontSize: 13.5, lineHeight: 1.6, whiteSpace: "pre-wrap", wordBreak: "break-word",
+              background: m.role === "user" ? "var(--primary)" : "var(--surface)",
+              color: m.role === "user" ? "#fff" : "var(--text)",
+              border: m.role === "assistant" ? "1px solid var(--border)" : "none",
+              borderBottomRightRadius: m.role === "user" ? 2 : 12,
+              borderBottomLeftRadius:  m.role === "assistant" ? 2 : 12,
+            }}>
+              {m.role === "assistant" && (
+                <div style={{ fontSize: 10, fontWeight: 700, color: "var(--primary)", marginBottom: 4, textTransform: "uppercase", letterSpacing: "0.06em" }}>
+                  Modèle
+                </div>
+              )}
+              {m.content}
+            </div>
+          </div>
+        ))}
+        {generating && (
+          <div style={{ display: "flex", justifyContent: "flex-start" }}>
+            <div style={{
+              padding: "9px 16px", borderRadius: 12, borderBottomLeftRadius: 2,
+              background: "var(--surface)", border: "1px solid var(--border)",
+              display: "flex", alignItems: "center", gap: 8,
+            }}>
+              <div className="spinner" style={{ width: 14, height: 14, border: "2px solid rgba(124,58,237,0.2)", borderTopColor: "var(--primary)" }} />
+              <span className="muted-text" style={{ fontSize: 13 }}>Génération en cours…</span>
+            </div>
+          </div>
+        )}
+        <div ref={bottomRef} />
+      </div>
+
+      {error && <div className="error-box" style={{ marginBottom: 10 }}>⚠ {error}</div>}
+
+      {/* Input */}
+      <div style={{ display: "flex", gap: 10, alignItems: "flex-end" }}>
+        <textarea
+          rows={2}
+          placeholder="Posez votre question… (Entrée pour envoyer, Shift+Entrée pour sauter une ligne)"
+          value={input}
+          onChange={e => setInput(e.target.value)}
+          onKeyDown={onKey}
+          disabled={generating}
+          style={{
+            flex: 1, resize: "vertical", minHeight: 52,
+            padding: "10px 14px", borderRadius: 10,
+            border: "1.5px solid var(--border)", fontSize: 13.5,
+            background: "var(--surface)", color: "var(--text)",
+            outline: "none", fontFamily: "inherit", lineHeight: 1.5,
+          }}
+        />
+        <button
+          className="action-btn action-primary"
+          style={{ height: 52, minWidth: 80, fontSize: 14, borderRadius: 10 }}
+          onClick={onSend}
+          disabled={!input.trim() || generating}
+        >
+          Envoyer
+        </button>
+      </div>
+    </div>
+  );
+}
+
 // ── Main Pipeline Page ────────────────────────────────────────────────────────
 
 export default function PipelinePage({
@@ -1350,6 +1576,11 @@ export default function PipelinePage({
         {/* Evaluation */}
         {(trainingReport || status === "done") && (
           <EvalCard evalState={evalState} evalReport={evalReport} onRunEval={onRunEval} isExpert={isExpert} />
+        )}
+
+        {/* Chat with model — shown after training completes */}
+        {(trainingReport || status === "done") && runId && (
+          <ChatPanel runId={runId} isExpert={isExpert} />
         )}
 
         {/* Dataset */}

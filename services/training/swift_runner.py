@@ -146,14 +146,13 @@ def run(
     tail: list[str] = []  # keep last 40 lines to surface errors
 
     # ── Early stopping state ──────────────────────────────────────────────────
-    _ES_PATIENCE_LIMIT    = 3      # consecutive evals without improvement → stop
     _ES_DIVERGE_THRESHOLD = 0.15   # eval_loss rises this much above best → stop immediately
-    _es_best_eval   = float("inf")
-    _es_patience    = 0
-    _es_prev_train  = float("inf")
-    _es_last_eval   = None         # detect when a new eval checkpoint appears
-    _es_triggered   = False
-    _es_reason      = ""
+    _es_best_eval    = float("inf")
+    _es_eval_history: list[float] = []   # all eval_loss values seen so far
+    _es_prev_train   = float("inf")
+    _es_last_eval    = None              # detect when a new eval checkpoint appears
+    _es_triggered    = False
+    _es_reason       = ""
 
     import os
     swift_env = os.environ.copy()
@@ -204,8 +203,10 @@ def run(
 
             if cur_eval is not None and cur_eval != _es_last_eval:
                 _es_last_eval = cur_eval
+                _es_eval_history.append(cur_eval)
+                history_str = [f"{v:.4f}" for v in _es_eval_history]
 
-                # Rule 1 — Divergence: eval rises while train still falls
+                # Rule 1 — Divergence: eval spikes while train still falls
                 if (_es_best_eval < float("inf")
                         and cur_eval > _es_best_eval + _ES_DIVERGE_THRESHOLD
                         and cur_train < _es_prev_train):
@@ -213,7 +214,8 @@ def run(
                     _es_reason = (
                         f"divergence — eval_loss={cur_eval:.4f} > "
                         f"best+{_ES_DIVERGE_THRESHOLD}={_es_best_eval + _ES_DIVERGE_THRESHOLD:.4f}, "
-                        f"train_loss still falling ({_es_prev_train:.4f}→{cur_train:.4f})"
+                        f"train_loss still falling ({_es_prev_train:.4f}→{cur_train:.4f}) "
+                        f"history={history_str}"
                     )
                     logger.info("early_stop DIVERGENCE → %s", _es_reason)
                     if log_callback:
@@ -221,32 +223,33 @@ def run(
                     proc.terminate()
                     break
 
-                # Rule 2 — Plateau: no meaningful improvement
-                if cur_eval < _es_best_eval - 0.001:
+                # Rule 2 — Dynamic overfitting: stop as soon as eval rises above best.
+                # The first eval always sets the baseline (best=inf → any value improves it).
+                # From the second eval onward: any rise above the best triggers stop — no
+                # fixed patience count, the history itself determines the optimal point.
+                if cur_eval < _es_best_eval:
                     _es_best_eval = cur_eval
-                    _es_patience  = 0
-                else:
-                    _es_patience += 1
                     logger.info(
-                        "early_stop patience=%d/%d  best_eval=%.4f  cur_eval=%.4f",
-                        _es_patience, _ES_PATIENCE_LIMIT, _es_best_eval, cur_eval,
+                        "early_stop new_best=%.4f  eval_history=%s",
+                        _es_best_eval, history_str,
                     )
                     if log_callback:
                         log_callback(
-                            f"[early_stop] patience {_es_patience}/{_ES_PATIENCE_LIMIT} "
-                            f"best={_es_best_eval:.4f} current={cur_eval:.4f}"
+                            f"[early_stop] new best={_es_best_eval:.4f}  "
+                            f"history={history_str}"
                         )
-                    if _es_patience >= _ES_PATIENCE_LIMIT:
-                        _es_triggered = True
-                        _es_reason = (
-                            f"plateau — {_ES_PATIENCE_LIMIT} evals without improvement, "
-                            f"best_eval_loss={_es_best_eval:.4f}"
-                        )
-                        logger.info("early_stop PLATEAU → %s", _es_reason)
-                        if log_callback:
-                            log_callback(f"[early_stop] PLATEAU: {_es_reason}")
-                        proc.terminate()
-                        break
+                elif _es_best_eval < float("inf"):
+                    # eval_loss rose above the best — optimal point already passed
+                    _es_triggered = True
+                    _es_reason = (
+                        f"overfitting — eval_loss={cur_eval:.4f} > best={_es_best_eval:.4f} "
+                        f"after {len(_es_eval_history)} evals: {history_str}"
+                    )
+                    logger.info("early_stop OVERFITTING → %s", _es_reason)
+                    if log_callback:
+                        log_callback(f"[early_stop] OVERFITTING: {_es_reason}")
+                    proc.terminate()
+                    break
 
                 _es_prev_train = cur_train
 

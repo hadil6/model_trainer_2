@@ -316,6 +316,50 @@ export async function fetchRunHistory(): Promise<RunSummary[]> {
   return data.runs ?? [];
 }
 
+// ── Chat with fine-tuned model ────────────────────────────────────────────────
+
+export interface ChatStatus {
+  loaded: boolean;
+  device: "gpu" | "cpu" | null;
+}
+
+export async function fetchChatStatus(runId: string): Promise<ChatStatus> {
+  const res = await fetch(`/api/runs/${runId}/chat/status`);
+  if (!res.ok) return { loaded: false, device: null };
+  return res.json();
+}
+
+export async function loadChatModel(runId: string): Promise<{ device: string }> {
+  const res = await fetch(`/api/runs/${runId}/chat/load`, { method: "POST" });
+  if (!res.ok) {
+    const text = await res.text();
+    throw new Error(`Model load failed: ${res.status} ${text}`);
+  }
+  return res.json();
+}
+
+export async function sendChatMessage(
+  runId: string,
+  message: string,
+  maxNewTokens = 256,
+): Promise<string> {
+  const res = await fetch(`/api/runs/${runId}/chat/message`, {
+    method:  "POST",
+    headers: { "Content-Type": "application/json" },
+    body:    JSON.stringify({ message, max_new_tokens: maxNewTokens }),
+  });
+  if (!res.ok) {
+    const text = await res.text();
+    throw new Error(`Generation failed: ${res.status} ${text}`);
+  }
+  const data = await res.json();
+  return data.response as string;
+}
+
+export async function unloadChatModel(runId: string): Promise<void> {
+  await fetch(`/api/runs/${runId}/chat/unload`, { method: "POST" });
+}
+
 // ── Training images ───────────────────────────────────────────────────────────
 
 export interface TrainingImage {

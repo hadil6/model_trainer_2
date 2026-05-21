@@ -5,7 +5,7 @@ from __future__ import annotations
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-from api.routes import datasets, eval, gpu, reports, runs, training_images
+from api.routes import chat, datasets, eval, gpu, reports, runs, training_images
 
 
 def create_app() -> FastAPI:
@@ -18,6 +18,7 @@ def create_app() -> FastAPI:
         allow_headers=["*"],
     )
 
+    app.include_router(chat.router)
     app.include_router(runs.router)
     app.include_router(datasets.router)
     app.include_router(eval.router)
