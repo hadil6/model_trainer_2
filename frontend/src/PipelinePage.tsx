@@ -1579,8 +1579,8 @@ export default function PipelinePage({
         )}
 
         {/* Chat with model — shown after training completes */}
-        {(trainingReport || status === "done") && runId && (
-          <ChatPanel runId={runId} isExpert={isExpert} />
+        {(trainingReport || status === "done") && (runId || trainingReport?.job_id) && (
+          <ChatPanel runId={runId || trainingReport?.job_id || ""} isExpert={isExpert} />
         )}
 
         {/* Dataset */}
