@@ -103,6 +103,29 @@ mcp.add_tool(_async_auto_fill_qa,           name="auto_fill_qa")
 mcp.add_tool(tool_finish,                   name="finish")
 
 
+def _make_app():
+    """Wrap the MCP SSE app with an extra /release_gpu REST endpoint."""
+    from starlette.applications import Starlette
+    from starlette.requests import Request
+    from starlette.responses import JSONResponse
+    from starlette.routing import Mount, Route
+
+    async def release_gpu_endpoint(request: Request) -> JSONResponse:
+        try:
+            body = await request.json()
+        except Exception:
+            body = {}
+        job_id = body.get("job_id", "unknown")
+        result = await anyio.to_thread.run_sync(lambda: tool_release_gpu(job_id))
+        logger.info("release_gpu HTTP endpoint called job=%s result=%s", job_id, result)
+        return JSONResponse(result)
+
+    return Starlette(routes=[
+        Route("/release_gpu", release_gpu_endpoint, methods=["POST"]),
+        Mount("/", app=mcp.sse_app()),
+    ])
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description="Data Agent MCP Server")
     parser.add_argument("--port", type=int, default=None)
@@ -112,7 +135,7 @@ def main() -> None:
     setup_logging()
     port = args.port or get_settings().mcp_port
     logger.info("Starting MCP server on %s:%d", args.host, port)
-    uvicorn.run(mcp.sse_app(), host=args.host, port=port, timeout_keep_alive=1800)
+    uvicorn.run(_make_app(), host=args.host, port=port, timeout_keep_alive=1800)
 
 
 if __name__ == "__main__":

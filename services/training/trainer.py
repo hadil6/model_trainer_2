@@ -23,6 +23,7 @@ run_hpo(job_id, model_id, peft_method, n_pairs, vram_gb, task, n_trials)        
 
 from __future__ import annotations
 
+import json
 import logging
 from typing import Callable
 
@@ -93,8 +94,24 @@ def run_training(
     )
 
     # ── Step 3: Free GPU before handing it to SWIFT ──────────────────────────
-    # marker-pdf and sentence-transformer may still hold VRAM from the data
-    # preparation phase. Release them now so SWIFT has the full GPU.
+    # Call release_gpu via HTTP on the MCP server so marker-pdf models are
+    # deleted from the MCP server process (different PID from uvicorn).
+    # This runs regardless of whether the data agent called release_gpu or not.
+    try:
+        import urllib.request, urllib.error
+        from core.config import get_settings as _gs
+        _mcp_url = f"http://localhost:{_gs().mcp_port}/release_gpu"
+        _payload = json.dumps({"job_id": job_id}).encode()
+        _req = urllib.request.Request(
+            _mcp_url, data=_payload,
+            headers={"Content-Type": "application/json"}, method="POST",
+        )
+        with urllib.request.urlopen(_req, timeout=30) as _resp:
+            logger.info("mcp release_gpu response: %s", _resp.read().decode()[:200])
+    except Exception as _mcp_exc:
+        logger.warning("mcp release_gpu call failed (non-fatal): %s", _mcp_exc)
+
+    # Also flush local CUDA cache in the uvicorn process
     try:
         from services.vram_cleanup import cleanup_vram
         cleanup_vram(label="before_swift_training")
