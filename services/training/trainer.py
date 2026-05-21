@@ -94,9 +94,21 @@ def run_training(
     )
 
     # ── Step 3: Free GPU before handing it to SWIFT ──────────────────────────
-    # Call release_gpu via HTTP on the MCP server so marker-pdf models are
-    # deleted from the MCP server process (different PID from uvicorn).
-    # This runs regardless of whether the data agent called release_gpu or not.
+    def _log_vram(label: str) -> None:
+        try:
+            import torch
+            if torch.cuda.is_available():
+                free, total = torch.cuda.mem_get_info()
+                used = total - free
+                logger.info(
+                    "VRAM [%s] — free: %.2f GB / total: %.2f GB / used: %.2f GB",
+                    label, free / 1024**3, total / 1024**3, used / 1024**3,
+                )
+        except Exception as e:
+            logger.warning("VRAM measure failed [%s]: %s", label, e)
+
+    _log_vram("before_release_gpu")
+
     try:
         import urllib.request, urllib.error
         from core.config import get_settings as _gs
@@ -107,9 +119,12 @@ def run_training(
             headers={"Content-Type": "application/json"}, method="POST",
         )
         with urllib.request.urlopen(_req, timeout=30) as _resp:
-            logger.info("mcp release_gpu response: %s", _resp.read().decode()[:200])
+            _result = _resp.read().decode()
+            logger.info("mcp release_gpu response: %s", _result[:300])
     except Exception as _mcp_exc:
         logger.warning("mcp release_gpu call failed (non-fatal): %s", _mcp_exc)
+
+    _log_vram("after_release_gpu")
 
     # Also flush local CUDA cache in the uvicorn process
     try:
@@ -117,6 +132,8 @@ def run_training(
         cleanup_vram(label="before_swift_training")
     except Exception as _vram_exc:
         logger.warning("pre-training VRAM cleanup failed (non-fatal): %s", _vram_exc)
+
+    _log_vram("after_full_cleanup")
 
     # ── Step 4: Run SWIFT ─────────────────────────────────────────────────────
     result = swift_runner.run(
