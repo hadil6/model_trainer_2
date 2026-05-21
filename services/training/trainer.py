@@ -177,6 +177,7 @@ def run_hpo(
     task: str = "question-answering",
     n_trials: int = 5,
     log_callback: Callable[[str], None] | None = None,
+    objective: str = "balanced",
 ) -> dict:
     """Single-phase Optuna HPO — each trial is a full training run.
 
@@ -269,8 +270,35 @@ def run_hpo(
     }
     seed_params["lora_alpha_ratio"] = _ratio
 
+    # Stop the study early if no improvement after 2 consecutive trials
+    _no_improve_streak = [0]
+    _best_so_far       = [float("inf")]
+
+    def _early_stop_callback(study, trial):
+        val = trial.value
+        if val is None or val == float("inf"):
+            _no_improve_streak[0] += 1
+        elif val < _best_so_far[0]:
+            _best_so_far[0]       = val
+            _no_improve_streak[0] = 0
+        else:
+            _no_improve_streak[0] += 1
+
+        if _no_improve_streak[0] >= 2 and len(study.trials) >= 2:
+            logger.info(
+                "hpo_early_stop: no improvement for %d consecutive trials — stopping study",
+                _no_improve_streak[0],
+            )
+            if log_callback:
+                log_callback(
+                    f"[HPO] Early stop — aucune amélioration depuis "
+                    f"{_no_improve_streak[0]} trials consécutifs."
+                )
+            study.stop()
+
     study.enqueue_trial(seed_params)
-    study.optimize(_objective, n_trials=n_trials, show_progress_bar=False)
+    study.optimize(_objective, n_trials=n_trials, show_progress_bar=False,
+                   callbacks=[_early_stop_callback])
 
     best_num    = study.best_trial.number
     best_hparams = trial_results[best_num]["hparams"]

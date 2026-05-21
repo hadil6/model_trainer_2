@@ -139,27 +139,48 @@ _TRIALS_SYSTEM = (
 
 _TRIALS_PROMPT = """\
 Determine the optimal number of Optuna HPO trials for this fine-tuning job.
-Each trial is a FULL training run (not a probe) — choose wisely to balance
-quality and total compute time.
+Each trial is a FULL training run with dynamic early stopping — trials stop
+as soon as eval_loss rises above the best seen, so each trial may be shorter
+than the full epoch count but still takes 10–50 minutes on a single GPU.
 
 === Context ===
-Model:       {model_name}
-Model size:  {size_b}B parameters
-PEFT method: {peft_method}
-Dataset:     {n_pairs} Q&A pairs
-GPU VRAM:    {vram_gb} GB
+Model:        {model_name}
+Model size:   {size_b}B parameters
+PEFT method:  {peft_method}
+Dataset:      {n_pairs} Q&A pairs
+GPU VRAM:     {vram_gb} GB
+Objective:    {objective}
+Early stopping: ALWAYS ACTIVE (stops at first eval_loss rise)
 
-=== Rules (Bergstra & Bengio 2012, Akiba et al. 2019) ===
-- Small dataset (<300 pairs): high variance → more trials needed (7–10)
-- Medium dataset (300–2000 pairs): moderate variance → balanced trials (5–7)
-- Large dataset (>2000 pairs): stable loss landscape → fewer trials (3–5)
-- VRAM <= 4 GB: each trial is slow → reduce trials (3–6 max)
-- Model < 1B parameters: trials are fast → allow more (up to 10)
-- Model > 7B parameters: trials are very slow → reduce (3–4 max)
-- Combine factors: small model + small dataset = 8–10, large model + 4GB = 3
+=== Rules ===
+PRIORITY 1 — Objective:
+- objective=speed:   minimize total training time → prefer 2–3 trials
+- objective=balanced: balance quality vs time   → prefer 3–4 trials
+- objective=quality: maximize model quality     → prefer 4–6 trials
+
+PRIORITY 2 — Early stopping reduces Optuna information per trial:
+- With early stopping, Optuna sees truncated loss curves → each trial
+  gives LESS signal than a full run → more trials do NOT help much.
+- Therefore: never recommend more than 4 trials when early stopping is active,
+  unless objective=quality AND dataset > 2000 pairs.
+
+PRIORITY 3 — Dataset size (secondary, early stopping dominates):
+- < 300 pairs:   landscape is noisy → +1 trial
+- 300–2000 pairs: moderate → no adjustment
+- > 2000 pairs:  stable → -1 trial
+
+PRIORITY 4 — Model size:
+- > 7B parameters: each trial is very slow → cap at 3 trials maximum
+- < 1B parameters: trials are fast → allow up to max for objective
+
+=== Hard caps ===
+- Minimum: 2 trials always
+- Maximum: 6 trials (never exceed, regardless of dataset size)
+- speed objective: maximum 3 trials
+- balanced objective: maximum 4 trials
 
 Return ONLY valid JSON:
-{{"n_trials": <int 3–10>, "rationale": "<one sentence>"}}"""
+{{"n_trials": <int 2–6>, "rationale": "<one sentence>"}}"""
 
 
 def recommend_n_trials(
@@ -168,15 +189,16 @@ def recommend_n_trials(
     n_pairs: int,
     vram_gb: int,
     llm_client: LLMClient,
+    objective: str = "balanced",
 ) -> int:
-    """LLM recommends number of Optuna HPO trials. Falls back to 5 on failure.
+    """LLM recommends number of Optuna HPO trials. Falls back to 3 on failure.
 
-    Factors considered (Bergstra & Bengio 2012, Akiba et al. 2019):
-      - n_pairs small → high variance → more trials
-      - n_pairs large → stable landscape → fewer trials
-      - VRAM low → each trial slow → fewer trials
-      - model small → trial fast → more trials feasible
+    Factors considered:
+      - objective: speed→2-3, balanced→3-4, quality→4-6
+      - early stopping always active → reduces info per trial → fewer needed
+      - n_pairs and model size are secondary adjustments
     """
+    _MAX_BY_OBJECTIVE = {"speed": 3, "balanced": 4, "quality": 6}
     size_b = detect_size_b(model_name)
     prompt = _TRIALS_PROMPT.format(
         model_name=model_name,
@@ -184,6 +206,7 @@ def recommend_n_trials(
         peft_method=peft_method,
         n_pairs=n_pairs,
         vram_gb=vram_gb,
+        objective=objective,
     )
     try:
         raw = llm_client.complete(system=_TRIALS_SYSTEM, user=prompt)
@@ -191,15 +214,16 @@ def recommend_n_trials(
         if m:
             d = json.loads(m.group(0))
             n = int(d["n_trials"])
-            n = max(3, min(10, n))
+            max_trials = _MAX_BY_OBJECTIVE.get(objective, 4)
+            n = max(2, min(max_trials, n))
             logger.info(
-                "recommend_n_trials model=%s n_pairs=%d vram=%dGB → n_trials=%d | %s",
-                model_name, n_pairs, vram_gb, n, d.get("rationale", ""),
+                "recommend_n_trials model=%s n_pairs=%d vram=%dGB objective=%s → n_trials=%d | %s",
+                model_name, n_pairs, vram_gb, objective, n, d.get("rationale", ""),
             )
             return n
     except Exception as exc:
-        logger.warning("recommend_n_trials_failed: %s — using default 5", exc)
-    return 5
+        logger.warning("recommend_n_trials_failed: %s — using default 3", exc)
+    return 3
 
 
 def _validate(parsed: dict, fallback: dict) -> dict | None:

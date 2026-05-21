@@ -1296,6 +1296,7 @@ async def _tool_train_model(state: OrchestratorState, args: dict) -> tuple[dict,
                 n_pairs=int(n_pairs),
                 vram_gb=vram_gb,
                 llm_client=llm_for_trials,
+                objective=state.get("objective", "balanced"),
             )
             await _notify(state, (
                 f"HPO — {n_trials} trials Optuna (entraînement complet par trial, "
@@ -1312,6 +1313,7 @@ async def _tool_train_model(state: OrchestratorState, args: dict) -> tuple[dict,
                     vram_gb=vram_gb,
                     task=task,
                     n_trials=n_trials,
+                    objective=state.get("objective", "balanced"),
                 ),
             )
             best_trial = (report.get("hpo_report") or {}).get("best_trial", 0)
