@@ -48,9 +48,10 @@ _BOOL_KEYS = {"gradient_checkpointing", "load_best_model_at_end", "greater_is_be
 #   2. The orchestrator's `_detect_overfitting()` runs post-hoc on the
 #      improvement_log and triggers a corrective re-training when needed.
 _EARLY_STOPPING_DEFAULTS: dict = {
-    "metric_for_best_model":   "eval_loss",
-    "greater_is_better":       False,
-    "load_best_model_at_end":  True,
+    "metric_for_best_model":     "eval_loss",
+    "greater_is_better":         False,
+    "load_best_model_at_end":    True,
+    "dataloader_num_workers":    0,   # no subprocesses → no orphan CUDA contexts
 }
 
 def _tuner_type_for(peft_method: str) -> str:
@@ -160,6 +161,7 @@ def run(
     swift_env["HF_HUB_DISABLE_SYMLINKS_IN_WINDOWS"] = "1"
     swift_env["HF_HUB_DISABLE_SYMLINKS"] = "1"
     swift_env["TRUST_REMOTE_CODE"] = "1"
+    swift_env["PYTORCH_CUDA_ALLOC_CONF"] = "expandable_segments:True"
 
     try:
         proc = subprocess.Popen(
