@@ -47,6 +47,8 @@ def _is_target_process(cmdline_str: str) -> tuple[bool, str]:
         return True, "multiprocessing_worker"
     if "torch.distributed.run" in cmdline_str or "torch.multiprocessing.spawn" in cmdline_str:
         return True, "torch_distributed_worker"
+    if "swift/cli/sft.py" in cmdline_str or "swift/cli/train.py" in cmdline_str:
+        return True, "swift_sft_orphan"
     return False, ""
 
 

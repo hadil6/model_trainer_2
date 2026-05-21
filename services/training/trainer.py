@@ -227,6 +227,13 @@ def run_hpo(
         # lora_alpha derived from ratio × rank (not an independent dimension)
         hparams["lora_alpha"] = search["lora_alpha"]
 
+        # Kill orphan SWIFT processes + flush CUDA cache before each trial
+        try:
+            from services.vram_cleanup import cleanup_vram
+            cleanup_vram(label=f"before_trial_{trial.number}")
+        except Exception as _ce:
+            logger.warning("pre-trial VRAM cleanup failed (non-fatal): %s", _ce)
+
         result = swift_runner.run(
             model_id=model_id,
             peft_method=final_peft,
