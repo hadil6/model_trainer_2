@@ -145,12 +145,22 @@ def run(
     metrics: dict = {}
     tail: list[str] = []  # keep last 40 lines to surface errors
 
+    # ── Early stopping state ──────────────────────────────────────────────────
+    _ES_PATIENCE_LIMIT    = 3      # consecutive evals without improvement → stop
+    _ES_DIVERGE_THRESHOLD = 0.15   # eval_loss rises this much above best → stop immediately
+    _es_best_eval   = float("inf")
+    _es_patience    = 0
+    _es_prev_train  = float("inf")
+    _es_last_eval   = None         # detect when a new eval checkpoint appears
+    _es_triggered   = False
+    _es_reason      = ""
+
     import os
     swift_env = os.environ.copy()
-    swift_env["USE_HF"] = "1"                              # force HuggingFace instead of ModelScope
-    swift_env["HF_HUB_DISABLE_SYMLINKS_IN_WINDOWS"] = "1" # fix WinError 1314 on Windows
-    swift_env["HF_HUB_DISABLE_SYMLINKS"] = "1"            # compatibility with older hub versions
-    swift_env["TRUST_REMOTE_CODE"] = "1"                   # allow custom architectures
+    swift_env["USE_HF"] = "1"
+    swift_env["HF_HUB_DISABLE_SYMLINKS_IN_WINDOWS"] = "1"
+    swift_env["HF_HUB_DISABLE_SYMLINKS"] = "1"
+    swift_env["TRUST_REMOTE_CODE"] = "1"
 
     try:
         proc = subprocess.Popen(
@@ -165,7 +175,7 @@ def run(
         assert proc.stdout
         for raw_line in proc.stdout:
             line = raw_line.rstrip()
-            logger.info("swift | %s", line)   # INFO so it appears in server logs
+            logger.info("swift | %s", line)
             if log_callback:
                 log_callback(line)
 
@@ -173,17 +183,72 @@ def run(
             if len(tail) > 40:
                 tail.pop(0)
 
-            # SWIFT emits metric dicts as JSON lines: {"loss": 1.2, "epoch": 1.0, ...}
+            # Parse metric lines
+            line_metrics: dict = {}
             if line.startswith("{") and "loss" in line:
                 try:
-                    metrics.update(json.loads(line))
+                    line_metrics = json.loads(line)
+                    metrics.update(line_metrics)
                 except json.JSONDecodeError:
                     pass
 
-            # Fallback regex for eval_loss in formatted output
             m = re.search(r"'eval_loss':\s*([\d.eE+\-]+)", line)
             if m:
-                metrics["eval_loss"] = float(m.group(1))
+                val = float(m.group(1))
+                metrics["eval_loss"] = val
+                line_metrics.setdefault("eval_loss", val)
+
+            # ── Early stopping check (fires only when a new eval_loss appears) ──
+            cur_eval  = line_metrics.get("eval_loss")
+            cur_train = line_metrics.get("loss") or metrics.get("loss", _es_prev_train)
+
+            if cur_eval is not None and cur_eval != _es_last_eval:
+                _es_last_eval = cur_eval
+
+                # Rule 1 — Divergence: eval rises while train still falls
+                if (_es_best_eval < float("inf")
+                        and cur_eval > _es_best_eval + _ES_DIVERGE_THRESHOLD
+                        and cur_train < _es_prev_train):
+                    _es_triggered = True
+                    _es_reason = (
+                        f"divergence — eval_loss={cur_eval:.4f} > "
+                        f"best+{_ES_DIVERGE_THRESHOLD}={_es_best_eval + _ES_DIVERGE_THRESHOLD:.4f}, "
+                        f"train_loss still falling ({_es_prev_train:.4f}→{cur_train:.4f})"
+                    )
+                    logger.info("early_stop DIVERGENCE → %s", _es_reason)
+                    if log_callback:
+                        log_callback(f"[early_stop] DIVERGENCE: {_es_reason}")
+                    proc.terminate()
+                    break
+
+                # Rule 2 — Plateau: no meaningful improvement
+                if cur_eval < _es_best_eval - 0.001:
+                    _es_best_eval = cur_eval
+                    _es_patience  = 0
+                else:
+                    _es_patience += 1
+                    logger.info(
+                        "early_stop patience=%d/%d  best_eval=%.4f  cur_eval=%.4f",
+                        _es_patience, _ES_PATIENCE_LIMIT, _es_best_eval, cur_eval,
+                    )
+                    if log_callback:
+                        log_callback(
+                            f"[early_stop] patience {_es_patience}/{_ES_PATIENCE_LIMIT} "
+                            f"best={_es_best_eval:.4f} current={cur_eval:.4f}"
+                        )
+                    if _es_patience >= _ES_PATIENCE_LIMIT:
+                        _es_triggered = True
+                        _es_reason = (
+                            f"plateau — {_ES_PATIENCE_LIMIT} evals without improvement, "
+                            f"best_eval_loss={_es_best_eval:.4f}"
+                        )
+                        logger.info("early_stop PLATEAU → %s", _es_reason)
+                        if log_callback:
+                            log_callback(f"[early_stop] PLATEAU: {_es_reason}")
+                        proc.terminate()
+                        break
+
+                _es_prev_train = cur_train
 
         proc.wait()
         exit_code = proc.returncode
@@ -196,8 +261,20 @@ def run(
         logger.error("swift_run_exception: %s", exc)
         return {"success": False, "error": str(exc), "metrics": metrics}
 
+    # Early-stopped trials are treated as success (best checkpoint already saved)
+    if _es_triggered:
+        logger.info("swift_run_early_stopped reason=%s metrics=%s", _es_reason, metrics)
+        return {
+            "success":       True,
+            "early_stopped": True,
+            "early_stop_reason": _es_reason,
+            "output_dir":    str(output_dir),
+            "metrics":       metrics,
+            "command":       cmd_str,
+        }
+
     if exit_code != 0:
-        error_lines = "\n".join(tail[-15:])  # last 15 lines = the actual error
+        error_lines = "\n".join(tail[-15:])
         logger.error("swift_run_failed exit_code=%d\n%s", exit_code, error_lines)
         return {
             "success":    False,
@@ -210,8 +287,9 @@ def run(
 
     logger.info("swift_run_done metrics=%s", metrics)
     return {
-        "success":    True,
-        "output_dir": str(output_dir),
-        "metrics":    metrics,
-        "command":    cmd_str,
+        "success":       True,
+        "early_stopped": False,
+        "output_dir":    str(output_dir),
+        "metrics":       metrics,
+        "command":       cmd_str,
     }
