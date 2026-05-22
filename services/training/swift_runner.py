@@ -133,6 +133,7 @@ def run(
     val_dataset: Path | None,
     output_dir: Path,
     log_callback: Callable[[str], None] | None = None,
+    cross_trial_best: float = float("inf"),
 ) -> dict:
     """Execute `swift sft`, stream logs, parse metrics, return result dict."""
     output_dir.mkdir(parents=True, exist_ok=True)
@@ -250,6 +251,24 @@ def run(
                     logger.info("early_stop OVERFITTING → %s", _es_reason)
                     if log_callback:
                         log_callback(f"[early_stop] OVERFITTING: {_es_reason}")
+                    proc.terminate()
+                    break
+
+                # Rule 3 — Cross-trial: after 2 evals, if this trial's own best
+                # still can't beat the global best from previous trials → no point
+                # continuing, terminate immediately.
+                if (len(_es_eval_history) >= 2
+                        and cross_trial_best < float("inf")
+                        and _es_best_eval > cross_trial_best):
+                    _es_triggered = True
+                    _es_reason = (
+                        f"cross_trial — trial best={_es_best_eval:.4f} > "
+                        f"global best={cross_trial_best:.4f} "
+                        f"after {len(_es_eval_history)} evals: {history_str}"
+                    )
+                    logger.info("early_stop CROSS_TRIAL → %s", _es_reason)
+                    if log_callback:
+                        log_callback(f"[early_stop] CROSS_TRIAL: {_es_reason}")
                     proc.terminate()
                     break
 

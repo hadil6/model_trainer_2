@@ -235,6 +235,13 @@ def run_hpo(
         except Exception as _ce:
             logger.warning("pre-trial VRAM cleanup failed (non-fatal): %s", _ce)
 
+        completed = [
+            t.value for t in study.trials
+            if t.value is not None and t.value != float("inf")
+            and t.number != trial.number
+        ]
+        global_best = min(completed) if completed else float("inf")
+
         result = swift_runner.run(
             model_id=model_id,
             peft_method=final_peft,
@@ -243,6 +250,7 @@ def run_hpo(
             val_dataset=val_file if val_file.exists() else None,
             output_dir=hpo_base / f"trial_{trial.number}",
             log_callback=log_callback,
+            cross_trial_best=global_best,
         )
         trial_results[trial.number] = {"hparams": hparams, "result": result}
 
