@@ -17,6 +17,10 @@ Sources:
 
 from __future__ import annotations
 
+import json
+import math
+from pathlib import Path
+
 from data.model_registry import detect_size_b
 
 # ── LoRA rank by model size ────────────────────────────────────────────────────
@@ -114,6 +118,51 @@ def get_hparams(
         "_effective_batch": phys_batch * grad_accum,
         "_n_pairs":         n_pairs,
     }
+
+
+# ── Adaptive max_length ───────────────────────────────────────────────────────
+
+def adaptive_max_length(train_file: Path, task: str = "question-answering") -> int:
+    """Compute max_length from actual dataset token statistics.
+
+    Formula: next_power_of_2( (max_chars_per_sample / 4 + 50) × 1.2 )
+      - chars/4  : standard token approximation for Latin-script text
+      - +50      : overhead for chat-template special tokens (im_start, im_end, roles)
+      - ×1.2     : 20% safety margin for tokenizer subword splits
+      - power-of-2: GPU tensor-core alignment (Vaswani et al., 2017; O(n²) attention)
+
+    Clamps to [256, 2048] for standard tasks, 4096 for code-generation.
+    Falls back to 2048 if the file cannot be read.
+    """
+    if task == "code-generation":
+        return 4096
+
+    try:
+        max_chars = 0
+        with train_file.open(encoding="utf-8") as f:
+            for line in f:
+                line = line.strip()
+                if not line:
+                    continue
+                try:
+                    obj = json.loads(line)
+                    chars = sum(
+                        len(m.get("content", ""))
+                        for m in obj.get("messages", [])
+                    )
+                    max_chars = max(max_chars, chars)
+                except Exception:
+                    continue
+
+        if max_chars == 0:
+            return 2048
+
+        estimated = int((max_chars / 4 + 50) * 1.2)
+        power = math.ceil(math.log2(max(256, estimated)))
+        return min(2048, 2 ** power)
+
+    except Exception:
+        return 2048
 
 
 # ── Phase 2: Optuna search space ──────────────────────────────────────────────

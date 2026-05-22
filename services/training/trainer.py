@@ -37,6 +37,7 @@ from data.artifact_store import (
 )
 from services.training.auto_peft import recommend_peft
 from services.training.hparam_advisor import recommend_hparams
+from services.training.hparams import adaptive_max_length
 from services.training import swift_runner
 
 logger = logging.getLogger(__name__)
@@ -82,14 +83,23 @@ def run_training(
     hparams = recommend_hparams(model_id, final_peft, actual_n, vram_gb, task, llm)
     source  = hparams.pop("_source", "unknown")
     rationale = hparams.pop("_rationale", "")
+
+    # Adaptive max_length — computed from actual dataset token stats.
+    # Overrides the static 2048 default only if the caller did not already
+    # provide an explicit max_length override.
+    if not hparam_overrides or "max_length" not in hparam_overrides:
+        hparams["max_length"] = adaptive_max_length(train_file, task)
+        logger.info("adaptive_max_length=%d job=%s", hparams["max_length"], job_id)
+
     if hparam_overrides:
         hparams.update(hparam_overrides)
 
     logger.info(
-        "hparams [%s] job=%s rank=%d alpha=%d lr=%s epochs=%d | %s",
+        "hparams [%s] job=%s rank=%d alpha=%d lr=%s epochs=%d max_length=%d | %s",
         source, job_id,
         hparams["lora_rank"], hparams["lora_alpha"],
         hparams["learning_rate"], hparams["num_train_epochs"],
+        hparams["max_length"],
         rationale,
     )
 
@@ -216,6 +226,10 @@ def run_hpo(
         )
 
     actual_n = n_pairs or sum(1 for _ in train_file.open(encoding="utf-8"))
+
+    # Adaptive max_length — shared across all HPO trials (same dataset)
+    llm_hparams["max_length"] = adaptive_max_length(train_file, task)
+    logger.info("adaptive_max_length=%d job=%s (hpo)", llm_hparams["max_length"], job_id)
     hpo_base = training_output_path(job_id) / "hpo"
 
     # Track per-trial results for the report
