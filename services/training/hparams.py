@@ -138,7 +138,7 @@ def adaptive_max_length(train_file: Path, task: str = "question-answering") -> i
         return 4096
 
     try:
-        max_chars = 0
+        char_lengths: list[int] = []
         with train_file.open(encoding="utf-8") as f:
             for line in f:
                 line = line.strip()
@@ -150,14 +150,17 @@ def adaptive_max_length(train_file: Path, task: str = "question-answering") -> i
                         len(m.get("content", ""))
                         for m in obj.get("messages", [])
                     )
-                    max_chars = max(max_chars, chars)
+                    char_lengths.append(chars)
                 except Exception:
                     continue
 
-        if max_chars == 0:
+        if not char_lengths:
             return 2048
 
-        estimated = int((max_chars / 4 + 50) * 1.2)
+        # Use 95th percentile — ignores outlier auto-filled long answers
+        char_lengths.sort()
+        p95_chars = char_lengths[int(len(char_lengths) * 0.95)]
+        estimated = int((p95_chars / 4 + 50) * 1.2)
         power = math.ceil(math.log2(max(256, estimated)))
         return min(2048, 2 ** power)
 
