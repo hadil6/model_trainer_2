@@ -1988,4 +1988,4 @@ _COMPILED_GRAPH = _build_graph().compile()
 
 
 async def run_orchestrator(state: OrchestratorState) -> OrchestratorState:
-    return await _COMPILED_GRAPH.ainvoke(state)
+    return await _COMPILED_GRAPH.ainvoke(state, config={"recursion_limit": 100})

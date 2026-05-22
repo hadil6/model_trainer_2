@@ -287,13 +287,18 @@ def run(
 
     # Early-stopped trials are treated as success (best checkpoint already saved)
     if _es_triggered:
-        logger.info("swift_run_early_stopped reason=%s metrics=%s", _es_reason, metrics)
+        # Report the best eval_loss seen, not the last (which triggered the stop)
+        best_metrics = dict(metrics)
+        if _es_best_eval < float("inf"):
+            best_metrics["eval_loss"] = _es_best_eval
+        logger.info("swift_run_early_stopped reason=%s best_eval=%.4f metrics=%s",
+                    _es_reason, _es_best_eval, best_metrics)
         return {
             "success":       True,
             "early_stopped": True,
             "early_stop_reason": _es_reason,
             "output_dir":    str(output_dir),
-            "metrics":       metrics,
+            "metrics":       best_metrics,
             "command":       cmd_str,
         }
 

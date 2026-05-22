@@ -37,11 +37,16 @@ def _collect_loss_history(job_id: str) -> list[dict]:
     if not output_dir:
         return []
 
-    # Collect all checkpoints
+    # For HPO runs: checkpoints are nested under hpo/trial_N/vN-.../checkpoint-*
     checkpoints = sorted(
         output_dir.glob("checkpoint-*"),
         key=lambda p: int(p.name.split("-")[-1]),
     )
+    if not checkpoints:
+        checkpoints = sorted(
+            output_dir.glob("*/*/checkpoint-*"),
+            key=lambda p: int(p.name.split("-")[-1]),
+        )
 
     # Merge log_history from all checkpoints (last checkpoint has the full history)
     for cp in reversed(checkpoints):
