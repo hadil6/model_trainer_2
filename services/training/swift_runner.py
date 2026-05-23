@@ -148,11 +148,9 @@ def run(
     tail: list[str] = []  # keep last 40 lines to surface errors
 
     # ── Early stopping state ──────────────────────────────────────────────────
-    # Divergence threshold: if eval_loss − train_loss > this at the same
-    # checkpoint, the model is overfitting — stop and keep best checkpoint.
-    _ES_GAP_THRESHOLD = 0.30
     _es_best_eval    = float("inf")
     _es_eval_history: list[float] = []   # all eval_loss values seen so far
+    _es_gap_history:  list[float] = []   # eval_loss − train_loss at each checkpoint
     _es_prev_train   = float("inf")
     _es_last_eval    = None              # detect when a new eval checkpoint appears
     _es_triggered    = False
@@ -211,17 +209,21 @@ def run(
                 _es_eval_history.append(cur_eval)
                 history_str = [f"{v:.4f}" for v in _es_eval_history]
 
-                # Rule 1 — Gap divergence: eval_loss and train_loss at the same
-                # checkpoint are too far apart → overfitting, stop now.
-                # Wait for 2+ evals so the first checkpoint doesn't false-fire.
+                # Rule 1 — Gap trend: the eval/train gap must grow for 2
+                # consecutive checkpoints AND exceed the initial gap.
+                # No fixed threshold — the signal is the direction of change.
                 gap = cur_eval - cur_train
-                if len(_es_eval_history) >= 2 and gap > _ES_GAP_THRESHOLD:
+                _es_gap_history.append(gap)
+                gap_str = [f"{v:.4f}" for v in _es_gap_history]
+                if (len(_es_gap_history) >= 3
+                        and _es_gap_history[-1] > _es_gap_history[-2]
+                        and _es_gap_history[-2] > _es_gap_history[-3]
+                        and _es_gap_history[-1] > _es_gap_history[0]):
                     _es_triggered = True
                     _es_reason = (
-                        f"divergence — gap={gap:.4f} "
-                        f"(eval={cur_eval:.4f}, train={cur_train:.4f}) "
-                        f"> threshold={_ES_GAP_THRESHOLD} "
-                        f"history={history_str}"
+                        f"divergence — gap growing for 2 consecutive checkpoints "
+                        f"and exceeds initial: gap_history={gap_str} "
+                        f"(eval={cur_eval:.4f}, train={cur_train:.4f})"
                     )
                     logger.info("early_stop DIVERGENCE → %s", _es_reason)
                     if log_callback:
