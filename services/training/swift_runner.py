@@ -148,7 +148,9 @@ def run(
     tail: list[str] = []  # keep last 40 lines to surface errors
 
     # ── Early stopping state ──────────────────────────────────────────────────
-    _ES_DIVERGE_THRESHOLD = 0.15   # eval_loss rises this much above best → stop immediately
+    # Divergence threshold: if eval_loss − train_loss > this at the same
+    # checkpoint, the model is overfitting — stop and keep best checkpoint.
+    _ES_GAP_THRESHOLD = 0.30
     _es_best_eval    = float("inf")
     _es_eval_history: list[float] = []   # all eval_loss values seen so far
     _es_prev_train   = float("inf")
@@ -209,15 +211,16 @@ def run(
                 _es_eval_history.append(cur_eval)
                 history_str = [f"{v:.4f}" for v in _es_eval_history]
 
-                # Rule 1 — Divergence: eval spikes while train still falls
-                if (_es_best_eval < float("inf")
-                        and cur_eval > _es_best_eval + _ES_DIVERGE_THRESHOLD
-                        and cur_train < _es_prev_train):
+                # Rule 1 — Gap divergence: eval_loss and train_loss at the same
+                # checkpoint are too far apart → overfitting, stop now.
+                # Wait for 2+ evals so the first checkpoint doesn't false-fire.
+                gap = cur_eval - cur_train
+                if len(_es_eval_history) >= 2 and gap > _ES_GAP_THRESHOLD:
                     _es_triggered = True
                     _es_reason = (
-                        f"divergence — eval_loss={cur_eval:.4f} > "
-                        f"best+{_ES_DIVERGE_THRESHOLD}={_es_best_eval + _ES_DIVERGE_THRESHOLD:.4f}, "
-                        f"train_loss still falling ({_es_prev_train:.4f}→{cur_train:.4f}) "
+                        f"divergence — gap={gap:.4f} "
+                        f"(eval={cur_eval:.4f}, train={cur_train:.4f}) "
+                        f"> threshold={_ES_GAP_THRESHOLD} "
                         f"history={history_str}"
                     )
                     logger.info("early_stop DIVERGENCE → %s", _es_reason)
