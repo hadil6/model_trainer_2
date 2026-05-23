@@ -249,6 +249,37 @@ def run_hpo(
         except Exception as _ce:
             logger.warning("pre-trial VRAM cleanup failed (non-fatal): %s", _ce)
 
+        # On Windows, the previous trial leaves Arrow cache files memory-mapped
+        # by the `datasets` library. The next trial gets WinError 1224 when it
+        # tries to write to the same cache path. Force gc + small sleep so the
+        # OS can release the mappings before the next subprocess starts.
+        if trial.number > 0:
+            import gc as _gc
+            import time as _time
+            _gc.collect()
+            try:
+                import torch as _torch
+                if _torch.cuda.is_available():
+                    _torch.cuda.empty_cache()
+                    _torch.cuda.ipc_collect()
+            except Exception:
+                pass
+            # Clear the HF datasets cache for our specific train file so the
+            # next trial regenerates it cleanly instead of reusing a locked mmap.
+            try:
+                from pathlib import Path as _Path
+                _cache_root = _Path.home() / ".cache" / "huggingface" / "datasets"
+                if _cache_root.exists():
+                    import shutil as _shutil
+                    for _entry in _cache_root.glob("json/**"):
+                        try:
+                            _shutil.rmtree(_entry, ignore_errors=True)
+                        except Exception:
+                            pass
+            except Exception as _ce:
+                logger.debug("datasets cache cleanup failed (non-fatal): %s", _ce)
+            _time.sleep(3)  # let WDDM/Windows release file handles
+
         completed = [
             t.value for t in study.trials
             if t.value is not None and t.value != float("inf")

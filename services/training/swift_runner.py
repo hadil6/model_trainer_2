@@ -164,6 +164,10 @@ def run(
     swift_env["HF_HUB_DISABLE_SYMLINKS"] = "1"
     swift_env["TRUST_REMOTE_CODE"] = "1"
     swift_env["PYTORCH_CUDA_ALLOC_CONF"] = "expandable_segments:True"
+    # Force unbuffered stdout so we see SWIFT's metric lines in real time.
+    # Default Windows block-buffering delayed eval lines by 20+ min, making
+    # Rule 1 / Rule 3 fire long after the divergence had already happened.
+    swift_env["PYTHONUNBUFFERED"] = "1"
 
     try:
         proc = subprocess.Popen(
@@ -215,6 +219,22 @@ def run(
                 _es_eval_history.append(cur_eval)
                 history_str = [f"{v:.4f}" for v in _es_eval_history]
 
+                # Rule 2 first — update _es_best_eval BEFORE the divergence check
+                # so that when Rule 1 fires at epoch N, the returned best_eval
+                # reflects the best including epoch N, not just up to epoch N-1.
+                # Critical for Optuna ranking and cross-trial comparison.
+                if cur_eval < _es_best_eval:
+                    _es_best_eval = cur_eval
+                    logger.info(
+                        "early_stop new_best=%.4f  eval_history=%s",
+                        _es_best_eval, history_str,
+                    )
+                    if log_callback:
+                        log_callback(
+                            f"[early_stop] new best={_es_best_eval:.4f}  "
+                            f"history={history_str}"
+                        )
+
                 # Rule 1 — Gap trend: gap must rise above the previous checkpoint
                 # AND above the very first checkpoint (initial baseline).
                 # Requires only 2 evals so it can fire at epoch 2 regardless of
@@ -238,21 +258,6 @@ def run(
                         log_callback(f"[early_stop] DIVERGENCE: {_es_reason}")
                     proc.terminate()
                     break
-
-                # Rule 2 — Track best eval; divergence (Rule 1) triggers the stop,
-                # not a simple rise. load_best_model_at_end guarantees the best
-                # checkpoint is returned regardless of when training ends.
-                if cur_eval < _es_best_eval:
-                    _es_best_eval = cur_eval
-                    logger.info(
-                        "early_stop new_best=%.4f  eval_history=%s",
-                        _es_best_eval, history_str,
-                    )
-                    if log_callback:
-                        log_callback(
-                            f"[early_stop] new best={_es_best_eval:.4f}  "
-                            f"history={history_str}"
-                        )
 
                 # Rule 3 — Cross-trial: from the very first eval, if this trial
                 # already can't beat the global best from previous trials → no
