@@ -18,7 +18,8 @@ import {
 } from "./api";
 import type { UserProfile } from "./App";
 
-const LS_RUN_KEY = "active_run_id";
+const LS_RUN_KEY       = "active_run_id";
+const LS_COMPLETED_KEY = "completed_run_id";
 
 type Status    = "idle" | "running" | "done" | "error" | "blocked";
 type EvalState = "idle" | "loading" | "done" | "error";
@@ -963,6 +964,18 @@ export default function PipelinePage({
     if (logsRef.current) logsRef.current.scrollTop = logsRef.current.scrollHeight;
   }, [logs]);
 
+  // Restore last completed run on mount so the chat button survives a page refresh
+  useEffect(() => {
+    const completedId = localStorage.getItem(LS_COMPLETED_KEY);
+    if (!completedId) return;
+    setRunId(completedId);
+    setStatus("done");
+    fetchTrainingReport(completedId).then(r => { if (r) setTrainingReport(r); }).catch(() => null);
+    fetchLossHistory(completedId).then(h => { if (h) setLossHistory(h); }).catch(() => null);
+    fetchTrainingImages(completedId).then(setTrainingImages).catch(() => null);
+    fetchDataset(completedId).then(setDataset).catch(() => null);
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+
   // Auto-detect GPU VRAM on mount — pre-fills the field with the real value
   useEffect(() => {
     fetchGpuInfo().then(info => {
@@ -1002,6 +1015,7 @@ export default function PipelinePage({
     const pipelineStatus = finalOut?.status ?? "done";
     if (pipelineStatus === "blocked") { setBlockedReason(finalOut?.summary ?? "Fichiers incompatibles."); setStatus("blocked"); return; }
     setStatus("done");
+    localStorage.setItem(LS_COMPLETED_KEY, id);
     fetchDataset(id).then(setDataset).catch(() => null);
     fetchTrainingReport(id).then(r => { if (r) setTrainingReport(r); }).catch(() => null);
     fetchLossHistory(id).then(h => { if (h) setLossHistory(h); }).catch(() => null);
@@ -1015,6 +1029,7 @@ export default function PipelinePage({
   async function onRun() {
     if (files.length === 0) { setError("Veuillez ajouter au moins un fichier."); return; }
     setStatus("running"); setLogs([]); setError(""); setBlockedReason("");
+    localStorage.removeItem(LS_COMPLETED_KEY);
     setDataset(null); setTrainingReport(null); setEvalReport(null);
     setEvalState("idle"); setLossHistory(null); setTrainingImages([]);
     setImprovementLog([]); setDecisionJournal([]);

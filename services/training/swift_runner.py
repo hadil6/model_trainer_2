@@ -226,10 +226,9 @@ def run(
                     proc.terminate()
                     break
 
-                # Rule 2 — Dynamic overfitting: stop as soon as eval rises above best.
-                # The first eval always sets the baseline (best=inf → any value improves it).
-                # From the second eval onward: any rise above the best triggers stop — no
-                # fixed patience count, the history itself determines the optimal point.
+                # Rule 2 — Track best eval; divergence (Rule 1) triggers the stop,
+                # not a simple rise. load_best_model_at_end guarantees the best
+                # checkpoint is returned regardless of when training ends.
                 if cur_eval < _es_best_eval:
                     _es_best_eval = cur_eval
                     logger.info(
@@ -241,18 +240,6 @@ def run(
                             f"[early_stop] new best={_es_best_eval:.4f}  "
                             f"history={history_str}"
                         )
-                elif _es_best_eval < float("inf"):
-                    # eval_loss rose above the best — optimal point already passed
-                    _es_triggered = True
-                    _es_reason = (
-                        f"overfitting — eval_loss={cur_eval:.4f} > best={_es_best_eval:.4f} "
-                        f"after {len(_es_eval_history)} evals: {history_str}"
-                    )
-                    logger.info("early_stop OVERFITTING → %s", _es_reason)
-                    if log_callback:
-                        log_callback(f"[early_stop] OVERFITTING: {_es_reason}")
-                    proc.terminate()
-                    break
 
                 # Rule 3 — Cross-trial: after 2 evals, if this trial's own best
                 # still can't beat the global best from previous trials → no point
