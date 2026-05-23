@@ -209,20 +209,22 @@ def run(
                 _es_eval_history.append(cur_eval)
                 history_str = [f"{v:.4f}" for v in _es_eval_history]
 
-                # Rule 1 — Gap trend: the eval/train gap must grow for 2
-                # consecutive checkpoints AND exceed the initial gap.
-                # No fixed threshold — the signal is the direction of change.
+                # Rule 1 — Gap trend: gap must rise above the previous checkpoint
+                # AND above the very first checkpoint (initial baseline).
+                # Requires only 2 evals so it can fire at epoch 2 regardless of
+                # total epoch count. The two conditions together filter out single
+                # transient fluctuations: a one-time blip above the previous eval
+                # does not trigger unless it also breaks the initial baseline.
                 gap = cur_eval - cur_train
                 _es_gap_history.append(gap)
                 gap_str = [f"{v:.4f}" for v in _es_gap_history]
-                if (len(_es_gap_history) >= 3
+                if (len(_es_gap_history) >= 2
                         and _es_gap_history[-1] > _es_gap_history[-2]
-                        and _es_gap_history[-2] > _es_gap_history[-3]
                         and _es_gap_history[-1] > _es_gap_history[0]):
                     _es_triggered = True
                     _es_reason = (
-                        f"divergence — gap growing for 2 consecutive checkpoints "
-                        f"and exceeds initial: gap_history={gap_str} "
+                        f"divergence — gap rising above previous and initial: "
+                        f"gap_history={gap_str} "
                         f"(eval={cur_eval:.4f}, train={cur_train:.4f})"
                     )
                     logger.info("early_stop DIVERGENCE → %s", _es_reason)
