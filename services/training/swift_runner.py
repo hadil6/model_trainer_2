@@ -254,10 +254,11 @@ def run(
                             f"history={history_str}"
                         )
 
-                # Rule 3 — Cross-trial: after 2 evals, if this trial's own best
-                # still can't beat the global best from previous trials → no point
-                # continuing, terminate immediately.
-                if (len(_es_eval_history) >= 2
+                # Rule 3 — Cross-trial: from the very first eval, if this trial
+                # already can't beat the global best from previous trials → no
+                # point continuing, terminate immediately. The 1st eval comes
+                # after a full epoch so it's already a meaningful signal.
+                if (len(_es_eval_history) >= 1
                         and cross_trial_best < float("inf")
                         and _es_best_eval > cross_trial_best):
                     _es_triggered = True
