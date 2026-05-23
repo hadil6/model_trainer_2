@@ -314,11 +314,18 @@ def run(
             "command":    cmd_str,
         }
 
-    logger.info("swift_run_done metrics=%s", metrics)
+    # Report the best eval_loss seen (the one load_best_model_at_end actually
+    # exports), not the last — Optuna must rank trials by what the saved
+    # checkpoint achieves, not by the final training-state eval.
+    best_metrics = dict(metrics)
+    if _es_best_eval < float("inf"):
+        best_metrics["eval_loss"] = _es_best_eval
+
+    logger.info("swift_run_done best_eval=%.4f metrics=%s", _es_best_eval, best_metrics)
     return {
         "success":       True,
         "early_stopped": False,
         "output_dir":    str(output_dir),
-        "metrics":       metrics,
+        "metrics":       best_metrics,
         "command":       cmd_str,
     }
