@@ -256,6 +256,16 @@ def run_hpo(
         ]
         global_best = min(completed) if completed else float("inf")
 
+        if global_best < float("inf"):
+            msg = (f"trial_{trial.number}_start cross_trial_best={global_best:.4f} "
+                   f"(from {len(completed)} previous trials) — will early-stop "
+                   f"if 1st eval > {global_best:.4f}")
+        else:
+            msg = f"trial_{trial.number}_start cross_trial_best=inf (no previous trials)"
+        logger.info(msg)
+        if log_callback:
+            log_callback(f"[hpo] {msg}")
+
         result = swift_runner.run(
             model_id=model_id,
             peft_method=final_peft,
