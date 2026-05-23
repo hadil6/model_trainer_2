@@ -910,6 +910,11 @@ async def _tool_select_model(state: OrchestratorState) -> tuple[dict, dict]:
             f"(méthode : {result.peft_method}, objectif : {inp.objective}). "
             f"Raison : {result.reasoning}"
         ))
+        try:
+            from services.vram_cleanup import cleanup_vram
+            cleanup_vram(label="after_select_model")
+        except Exception as _ce:
+            logger.debug("post-select cleanup failed (non-fatal): %s", _ce)
         return d, {
             "selection_result": d,
             "target_model":     result.model_id,
@@ -1045,6 +1050,11 @@ async def _tool_prepare_data(state: OrchestratorState) -> tuple[dict, dict]:
         else f"Données prêtes — {n_pairs} paires QA générées et exportées."
     )
     await _notify(state, done_msg)
+    try:
+        from services.vram_cleanup import cleanup_vram
+        cleanup_vram(label="after_prepare_data")
+    except Exception as _ce:
+        logger.debug("post-prepare cleanup failed (non-fatal): %s", _ce)
     return result, {"data_result": result}
 
 
