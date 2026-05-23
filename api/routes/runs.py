@@ -163,16 +163,17 @@ async def create_run(
 
     # Use available VRAM minus a headroom reserve to account for persistent
     # processes that share the GPU (MCP server, sentence transformer, profiling
-    # tools, OS overhead). Using total_gb causes OOM when those processes don't
-    # release VRAM before training starts.
-    _OVERHEAD_RESERVE_GB = 3
+    # tools, OS overhead). The reserve is proportional to available VRAM —
+    # a fixed 3 GB would eat 75 % of a 4 GB GPU but only ~20 % of a 16 GB one.
+    # Cap: at most 3 GB on large GPUs, at least 0.5 GB on tiny ones.
     from services.gpu_probe import detect_vram
     gpu_info = detect_vram()
     if gpu_info is not None:
-        gpu_vram_gb = max(1, int(gpu_info.available_gb) - _OVERHEAD_RESERVE_GB)
+        reserve = max(0.5, min(3.0, gpu_info.available_gb * 0.20))
+        gpu_vram_gb = max(1, int(gpu_info.available_gb - reserve))
         logger.info(
-            "GPU auto-detected: %s — total=%.1fGB available=%.1fGB reserved=%dGB → budget=%dGB for model selection",
-            gpu_info.name, gpu_info.total_gb, gpu_info.available_gb, _OVERHEAD_RESERVE_GB, gpu_vram_gb,
+            "GPU auto-detected: %s — total=%.1fGB available=%.1fGB reserved=%.1fGB → budget=%dGB for model selection",
+            gpu_info.name, gpu_info.total_gb, gpu_info.available_gb, reserve, gpu_vram_gb,
         )
     else:
         logger.info("No GPU detected — using user-supplied gpu_vram_gb=%d", gpu_vram_gb)
