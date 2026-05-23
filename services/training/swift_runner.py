@@ -11,6 +11,7 @@ Key changes from SWIFT 3.x → 4.x:
 
 from __future__ import annotations
 
+import ast
 import json
 import logging
 import re
@@ -185,14 +186,19 @@ def run(
             if len(tail) > 40:
                 tail.pop(0)
 
-            # Parse metric lines
+            # Parse metric lines — SWIFT outputs Python dict format (single quotes),
+            # not valid JSON, so fall back to ast.literal_eval.
             line_metrics: dict = {}
             if line.startswith("{") and "loss" in line:
                 try:
                     line_metrics = json.loads(line)
                     metrics.update(line_metrics)
                 except json.JSONDecodeError:
-                    pass
+                    try:
+                        line_metrics = ast.literal_eval(line)
+                        metrics.update(line_metrics)
+                    except (ValueError, SyntaxError):
+                        pass
 
             m = re.search(r"'eval_loss':\s*([\d.eE+\-]+)", line)
             if m:
