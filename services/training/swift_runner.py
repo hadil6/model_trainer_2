@@ -168,11 +168,17 @@ def run(
     # Default Windows block-buffering delayed eval lines by 20+ min, making
     # Rule 1 / Rule 3 fire long after the divergence had already happened.
     swift_env["PYTHONUNBUFFERED"] = "1"
-    # Each HPO trial gets its own HF datasets cache so the previous trial's
-    # memory-mapped Arrow file (which Windows refuses to release for ~minutes
-    # after the subprocess exits) doesn't block the next trial's dataset.map()
-    # with `OSError: [WinError 1224]`. Cost: ~30 s extra tokenization per trial.
-    swift_env["HF_DATASETS_CACHE"] = str(output_dir / "_hf_datasets_cache")
+    # Each invocation of swift_runner.run() gets a UNIQUE HF datasets cache
+    # directory (timestamp + uuid suffix) so the previous run's memory-mapped
+    # Arrow file (which Windows refuses to release for ~minutes after the
+    # subprocess exits) doesn't block the next dataset.map() with
+    # `OSError: [WinError 1224]`. This protects both inter-trial collisions
+    # (HPO) AND inter-iteration collisions (orchestrator corrective retries).
+    # Cost: ~30 s extra tokenization per run.
+    import time as _time
+    import uuid as _uuid
+    _cache_suffix = f"{int(_time.time() * 1000)}_{_uuid.uuid4().hex[:8]}"
+    swift_env["HF_DATASETS_CACHE"] = str(output_dir / f"_hf_datasets_cache_{_cache_suffix}")
 
     try:
         proc = subprocess.Popen(

@@ -32,7 +32,27 @@ from data.artifact_store import ensure_job_dirs, write_json
 
 logger = logging.getLogger(__name__)
 
-HARD_MAX_ITERATIONS   = 10
+def _compute_hard_max_iterations() -> int:
+    """Hard cap on corrective iterations. Lower on Windows + small GPU to avoid
+    retry loops triggered by Windows-specific Arrow cache mmap conflicts."""
+    import os
+    if os.environ.get("HARD_MAX_ITERATIONS"):
+        try:
+            return int(os.environ["HARD_MAX_ITERATIONS"])
+        except ValueError:
+            pass
+    try:
+        import platform, torch as _torch
+        if (platform.system() == "Windows"
+                and _torch.cuda.is_available()
+                and _torch.cuda.get_device_properties(0).total_memory / 1e9 < 6.0):
+            return 2
+    except Exception:
+        pass
+    return 10
+
+
+HARD_MAX_ITERATIONS   = _compute_hard_max_iterations()
 HPO_ENABLED           = True  # set False to skip HPO and use run_training() directly
 
 
