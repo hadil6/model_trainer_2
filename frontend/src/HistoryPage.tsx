@@ -224,7 +224,7 @@ export default function HistoryPage({
 
             {/* Actions */}
             {canChat && (
-              <div style={{ display: "flex", gap: 10, marginTop: 14, paddingTop: 12, borderTop: "1px solid var(--border)" }}>
+              <div style={{ display: "flex", gap: 10, marginTop: 14, paddingTop: 12, borderTop: "1px solid var(--border)", flexWrap: "wrap" }}>
                 <a href={modelDownloadUrl(run.job_id)} download>
                   <button className="action-btn action-primary" style={{ fontSize: 12 }}>
                     ⬇ Adaptateur LoRA
@@ -235,9 +235,18 @@ export default function HistoryPage({
                     ⬇ Rapport JSON
                   </button>
                 </a>
+                <button
+                  className="action-btn action-secondary"
+                  style={{ fontSize: 12 }}
+                  onClick={() => {
+                    localStorage.setItem("completed_run_id", run.job_id);
+                    onBack();
+                  }}
+                >
+                  💬 Tester en chat
+                </button>
               </div>
             )}
-            {canChat && <InlineChat runId={run.job_id} />}
           </div>
         );
       })}
