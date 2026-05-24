@@ -22,6 +22,76 @@ from data.model_zoo.model_cards import get_card_by_id
 logger = logging.getLogger(__name__)
 
 
+def _is_model_fully_cached(model_id: str, min_size_mb: float = 100.0) -> bool:
+    """True if the HuggingFace cache for `model_id` contains the actual weights.
+
+    A model whose cache directory only contains tokenizer/config files (~10 MB)
+    is treated as NOT cached — its model.safetensors is missing and would need
+    to be downloaded. We require at least one big file (~100 MB+) to consider
+    the model usable without network.
+    """
+    import os
+    from pathlib import Path
+    cache_root = Path(os.environ.get("HF_HUB_CACHE",
+                      Path.home() / ".cache" / "huggingface" / "hub"))
+    folder_name = "models--" + model_id.replace("/", "--")
+    model_dir = cache_root / folder_name
+    if not model_dir.exists():
+        return False
+    try:
+        total_bytes = sum(
+            f.stat().st_size for f in model_dir.rglob("*") if f.is_file()
+        )
+        return total_bytes >= min_size_mb * 1024 * 1024
+    except Exception:
+        return False
+
+
+def _prefer_cached_models(candidates: list[dict], inp_objective: str = "balanced") -> list[dict]:
+    """Reorder candidates so already-cached models come first.
+
+    On Windows + small GPU (< 6 GB total) or when MODEL_SELECT_PREFER_CACHED=1,
+    candidates whose weights are NOT yet downloaded are filtered out entirely
+    (to avoid risky downloads that hang). Otherwise we just sort cached first
+    without removing anything.
+    """
+    import os
+    force_cached = os.environ.get("MODEL_SELECT_PREFER_CACHED", "").lower() in ("1", "true", "yes")
+    auto_cached  = False
+    try:
+        import platform, torch
+        if (platform.system() == "Windows"
+                and torch.cuda.is_available()
+                and torch.cuda.get_device_properties(0).total_memory / 1e9 < 6.0):
+            auto_cached = True
+    except Exception:
+        pass
+
+    cached, not_cached = [], []
+    for c in candidates:
+        if _is_model_fully_cached(c["model_id"]):
+            c = {**c, "_already_cached": True}
+            cached.append(c)
+        else:
+            c = {**c, "_already_cached": False}
+            not_cached.append(c)
+
+    if (force_cached or auto_cached) and cached:
+        logger.info(
+            "model_selection: filtered to %d cached model(s) (Windows + small GPU or explicit opt-in) — "
+            "skipping %d uncached candidate(s)",
+            len(cached), len(not_cached),
+        )
+        return cached
+
+    if cached:
+        logger.info(
+            "model_selection: %d cached candidate(s) moved to top of list (over %d uncached)",
+            len(cached), len(not_cached),
+        )
+    return cached + not_cached
+
+
 @dataclass
 class SelectionInput:
     task: str
@@ -85,6 +155,11 @@ class ModelSelector:
             candidates = [c for c in candidates if c["model_id"] not in excluded]
             logger.info("reselect: excluded %s → %d candidates remain", excluded, len(candidates))
 
+        # On constrained / unreliable setups, prefer (or restrict to) models
+        # whose weights are already in the local HuggingFace cache. This avoids
+        # the silent download hang we keep hitting on Windows + 4 GB.
+        candidates = _prefer_cached_models(candidates, inp.objective)
+
         candidates = candidates[:3]  # keep top-3 after exclusion
 
         if not candidates:
@@ -141,8 +216,9 @@ class ModelSelector:
             tasks    = ", ".join(c.get("supported_tasks") or ["unknown"])
             methods  = c.get("feasible_peft_methods") or ["qlora"]
             ctx      = c.get("context_length")
+            cache_tag = " [ALREADY CACHED LOCALLY — strongly preferred]" if c.get("_already_cached") else ""
             candidates_text += (
-                f"\nCandidate {i}: {c['model_id']}\n"
+                f"\nCandidate {i}: {c['model_id']}{cache_tag}\n"
                 f"  Parameters:       {params}B\n"
                 f"  Supported tasks:  {tasks}\n"
                 f"  Languages:        {langs}\n"
