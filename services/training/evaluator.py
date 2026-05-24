@@ -43,6 +43,7 @@ from __future__ import annotations
 import gc
 import json
 import logging
+import os
 import random
 import re
 from typing import Any
@@ -658,7 +659,28 @@ def evaluate(
         logger.warning("llm_client_unavailable: %s", exc)
 
     # ── 5b. Extended LLM-based metrics (generation tasks only) ────────────────
-    if use_llm_judge and results and strategy == "generation" and _llm_client:
+    # Skip G-Eval + Faithfulness when:
+    #   - env var EVAL_SKIP_LLM_JUDGE=1 is set (manual opt-out), OR
+    #   - we are on Windows with a small GPU (< 6 GB total) — these LLM calls
+    #     have historically hung indefinitely on this configuration with no
+    #     timeout. BERTScore + ROUGE + BLEU + F1 are sufficient as quality
+    #     signals; the primary metric (bertscore_f1) does not depend on judges.
+    _skip_judge = os.environ.get("EVAL_SKIP_LLM_JUDGE", "").lower() in ("1", "true", "yes")
+    if not _skip_judge:
+        try:
+            import platform, torch as _torch
+            if platform.system() == "Windows" and _torch.cuda.is_available():
+                _total_gb = _torch.cuda.get_device_properties(0).total_memory / 1e9
+                if _total_gb < 6.0:
+                    _skip_judge = True
+                    logger.info(
+                        "llm_judge auto-skipped: Windows + small GPU (%.1f GB) — relying on lexical + BERTScore",
+                        _total_gb,
+                    )
+        except Exception:
+            pass
+
+    if use_llm_judge and not _skip_judge and results and strategy == "generation" and _llm_client:
         try:
             g_eval_scores = _g_eval(results, _task, _llm_client, n=judge_n)
             metrics.update(g_eval_scores)
@@ -669,6 +691,8 @@ def evaluate(
 
         except Exception as exc:
             logger.warning("llm_judge_skipped: %s", exc)
+    elif _skip_judge:
+        logger.info("llm_judge skipped (EVAL_SKIP_LLM_JUDGE or Windows+small-GPU policy)")
 
     # ── 6. Domain-aware quality summary ──────────────────────────────────────
     _domain = "general"
