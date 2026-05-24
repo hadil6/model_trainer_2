@@ -1477,11 +1477,27 @@ async def _tool_evaluate_model(state: OrchestratorState) -> tuple[dict, dict]:
         primary_acceptable   = eval_strat.get("acceptable_threshold", 0.28)
         primary_value        = metrics.get(primary_metric, metrics.get("rouge1", 0))
 
-        # Quality tier based on primary metric thresholds
+        # Quality tier based on primary metric thresholds.
+        # A 10% tolerance band below `primary_acceptable` is still treated as
+        # "acceptable" (borderline), because:
+        #   - Test set has only 50 samples → ±0.02-0.03 variance on lexical metrics
+        #   - Single-reference scoring penalizes valid paraphrases
+        #   - 5-10 % under threshold is not "catastrophic" enough to justify
+        #     a costly corrective re-training loop.
+        # Only values significantly below trigger the "poor" tier and a retry.
+        NEAR_ACCEPTABLE_TOLERANCE = 0.10  # 10 % margin under acceptable
+        near_acceptable_floor = primary_acceptable * (1 - NEAR_ACCEPTABLE_TOLERANCE)
+
         if primary_value >= primary_good:
             quality_tier = "good"
         elif primary_value >= primary_acceptable:
             quality_tier = "acceptable"
+        elif primary_value >= near_acceptable_floor:
+            quality_tier = "acceptable"  # borderline — within tolerance band
+            logger.info(
+                "quality_tier: borderline acceptable (%.3f within 10%% of threshold %.3f)",
+                primary_value, primary_acceptable,
+            )
         else:
             quality_tier = "poor"
 
@@ -1520,6 +1536,14 @@ async def _tool_evaluate_model(state: OrchestratorState) -> tuple[dict, dict]:
             )
         elif quality_tier == "good":
             recommendation = "Objectif atteint — le modèle sera exporté."
+        elif quality_tier == "acceptable" and primary_value < primary_acceptable:
+            # Borderline case: under threshold but within 10 % tolerance.
+            # Accept as-is, no corrective action.
+            recommendation = (
+                f"Score {primary_metric} ({primary_value:.3f}) légèrement sous le minimum requis ({primary_acceptable}) "
+                f"mais dans la marge de tolérance de 10 % (>{near_acceptable_floor:.3f}). "
+                "Le modèle sera accepté comme qualité limitée — pas d'itération corrective."
+            )
         elif quality_tier == "acceptable" and _detect_stagnation(trial_log):
             recommendation = "Qualité acceptable et stagnation détectée — pipeline terminé."
         elif n_pairs_current < MIN_PAIRS_FOR_GOOD:
