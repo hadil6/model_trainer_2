@@ -168,6 +168,11 @@ def run(
     # Default Windows block-buffering delayed eval lines by 20+ min, making
     # Rule 1 / Rule 3 fire long after the divergence had already happened.
     swift_env["PYTHONUNBUFFERED"] = "1"
+    # Each HPO trial gets its own HF datasets cache so the previous trial's
+    # memory-mapped Arrow file (which Windows refuses to release for ~minutes
+    # after the subprocess exits) doesn't block the next trial's dataset.map()
+    # with `OSError: [WinError 1224]`. Cost: ~30 s extra tokenization per trial.
+    swift_env["HF_DATASETS_CACHE"] = str(output_dir / "_hf_datasets_cache")
 
     try:
         proc = subprocess.Popen(
