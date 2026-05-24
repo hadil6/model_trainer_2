@@ -222,31 +222,32 @@ export default function HistoryPage({
               </div>
             )}
 
-            {/* Actions */}
-            {canChat && (
-              <div style={{ display: "flex", gap: 10, marginTop: 14, paddingTop: 12, borderTop: "1px solid var(--border)", flexWrap: "wrap" }}>
-                <a href={modelDownloadUrl(run.job_id)} download>
-                  <button className="action-btn action-primary" style={{ fontSize: 12 }}>
-                    ⬇ Adaptateur LoRA
-                  </button>
-                </a>
-                <a href={reportDownloadUrl(run.job_id)} download>
-                  <button className="action-btn action-secondary" style={{ fontSize: 12 }}>
-                    ⬇ Rapport JSON
-                  </button>
-                </a>
-                <button
-                  className="action-btn action-secondary"
-                  style={{ fontSize: 12 }}
-                  onClick={() => {
-                    localStorage.setItem("completed_run_id", run.job_id);
-                    onBack();
-                  }}
-                >
-                  💬 Tester en chat
+            {/* Actions — boutons toujours visibles, peu importe le statut.
+                 Si l'adaptateur n'existe pas (run échoué avant training), le
+                 ChatPanel et le téléchargement afficheront un message d'erreur
+                 explicite. */}
+            <div style={{ display: "flex", gap: 10, marginTop: 14, paddingTop: 12, borderTop: "1px solid var(--border)", flexWrap: "wrap" }}>
+              <a href={modelDownloadUrl(run.job_id)} download>
+                <button className="action-btn action-primary" style={{ fontSize: 12 }}>
+                  ⬇ Adaptateur LoRA
                 </button>
-              </div>
-            )}
+              </a>
+              <a href={reportDownloadUrl(run.job_id)} download>
+                <button className="action-btn action-secondary" style={{ fontSize: 12 }}>
+                  ⬇ Rapport JSON
+                </button>
+              </a>
+              <button
+                className="action-btn action-secondary"
+                style={{ fontSize: 12 }}
+                onClick={() => {
+                  localStorage.setItem("completed_run_id", run.job_id);
+                  onBack();
+                }}
+              >
+                💬 Tester en chat
+              </button>
+            </div>
           </div>
         );
       })}
