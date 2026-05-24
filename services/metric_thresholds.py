@@ -240,9 +240,27 @@ Reply ONLY with valid JSON:
 
 
 def _bertscore_available() -> bool:
-    """True if the bert-score package is importable (BERTScore can be computed)."""
-    import importlib.util
-    return importlib.util.find_spec("bert_score") is not None
+    """True if BERTScore can actually be computed AND used as primary metric.
+
+    Importable AND not auto-skipped by the evaluator. On Windows + small GPU
+    (< 6 GB) the BERTScore step is skipped at eval time, so we must also lie
+    here so the LLM doesn't pick bertscore_f1 as primary_metric (which would
+    then be missing and break the orchestrator's quality decision).
+    """
+    import importlib.util, os
+    if importlib.util.find_spec("bert_score") is None:
+        return False
+    if os.environ.get("EVAL_FORCE_BERTSCORE", "").lower() in ("1", "true", "yes"):
+        return True
+    try:
+        import platform, torch
+        if platform.system() == "Windows" and torch.cuda.is_available():
+            total_gb = torch.cuda.get_device_properties(0).total_memory / 1e9
+            if total_gb < 6.0:
+                return False
+    except Exception:
+        pass
+    return True
 
 
 def _llm_strategy(task: str, domain: str, user_goal: str, llm_client) -> EvalStrategy | None:

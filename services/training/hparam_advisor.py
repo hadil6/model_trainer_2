@@ -198,6 +198,25 @@ def recommend_n_trials(
       - early stopping always active → reduces info per trial → fewer needed
       - n_pairs and model size are secondary adjustments
     """
+    # Hard cap to 1 trial on Windows + small GPU. Multi-trial HPO triggers
+    # the HF datasets WinError 1224 cache-mmap conflict that we cannot fully
+    # work around at the application layer. Better to converge once cleanly
+    # than to crash on trial 2.
+    try:
+        import platform, os
+        import torch as _torch
+        if (platform.system() == "Windows"
+                and _torch.cuda.is_available()
+                and _torch.cuda.get_device_properties(0).total_memory / 1e9 < 6.0
+                and os.environ.get("HPO_FORCE_MULTI_TRIAL", "").lower() not in ("1", "true", "yes")):
+            logger.info(
+                "recommend_n_trials: capped to 1 (Windows + small GPU) — "
+                "set HPO_FORCE_MULTI_TRIAL=1 to override"
+            )
+            return 1
+    except Exception:
+        pass
+
     _MAX_BY_OBJECTIVE = {"speed": 3, "balanced": 4, "quality": 6}
     size_b = detect_size_b(model_name)
     prompt = _TRIALS_PROMPT.format(

@@ -135,20 +135,31 @@ def _compute_bertscore(
     try:
         from bert_score import score as bs_score
         import torch
-        # On low-VRAM GPUs (< 6 GB total), loading RoBERTa-large (~1.4 GB)
-        # alongside the already-resident SFT model causes silent CUDA deadlocks
-        # on Windows. Force CPU on those GPUs — slower but reliable.
-        device = "cpu"
+        import platform
+        # On low-VRAM GPUs (< 6 GB) Windows hangs both on GPU (silent CUDA
+        # deadlock) and on CPU (RoBERTa-large loading + swap thrashing kills
+        # the process for 20+ min). Skip entirely on those configs.
         if torch.cuda.is_available():
             total_gb = torch.cuda.get_device_properties(0).total_memory / 1e9
             free_gb  = torch.cuda.mem_get_info()[0] / 1e9
-            if total_gb >= 6.0 and free_gb >= 2.0:
+            if platform.system() == "Windows" and total_gb < 6.0:
+                logger.info(
+                    "bertscore SKIPPED: Windows + small GPU (%.1f GB) — set EVAL_FORCE_BERTSCORE=1 to override",
+                    total_gb,
+                )
+                if os.environ.get("EVAL_FORCE_BERTSCORE", "").lower() not in ("1", "true", "yes"):
+                    return {}
+                device = "cpu"
+            elif total_gb >= 6.0 and free_gb >= 2.0:
                 device = "cuda"
             else:
+                device = "cpu"
                 logger.info(
-                    "bertscore: forcing CPU (total=%.1fGB free=%.1fGB — too tight for RoBERTa-large on Windows)",
+                    "bertscore: forcing CPU (total=%.1fGB free=%.1fGB)",
                     total_gb, free_gb,
                 )
+        else:
+            device = "cpu"
         bs_lang = lang if lang in ("en", "fr", "de", "zh", "ar", "es", "pt") else "en"
         P, R, F1 = bs_score(
             hypotheses, references,
