@@ -349,7 +349,10 @@ def _detect_insufficient_data(
     Triggers when:
       - n_pairs < 50 (hard floor — never enough for any task), OR
       - n_pairs < 200 AND last primary_metric < acceptable threshold
-        (model couldn't reach minimum quality with so few examples)
+        (model couldn't reach minimum quality with so few examples), OR
+      - n_pairs < 2000 AND last primary_metric < good threshold
+        (data-volume floor: cannot claim "good" quality with under 2k pairs;
+         orchestrator should call auto_fill_qa to push toward 2k)
     """
     n_pairs = int((state.get("data_result") or {}).get("n_pairs", 0) or 0)
     if n_pairs == 0:
@@ -360,6 +363,13 @@ def _detect_insufficient_data(
     if n_pairs < 200 and improvement_log:
         last = improvement_log[-1]
         primary_value = last.get("primary_metric_value", last.get("rouge1", 0))
+        if primary_value < primary_acceptable:
+            return True
+    if n_pairs < 2000 and improvement_log:
+        last = improvement_log[-1]
+        primary_value = last.get("primary_metric_value", last.get("rouge1", 0))
+        # Only declare insufficient if we haven't yet reached the GOOD floor —
+        # under 2k pairs we cannot certify "good", so push to fill.
         if primary_value < primary_acceptable:
             return True
     return False
@@ -1475,6 +1485,19 @@ async def _tool_evaluate_model(state: OrchestratorState) -> tuple[dict, dict]:
         else:
             quality_tier = "poor"
 
+        # Data-volume floor: a model trained on too few QA pairs cannot be
+        # called "good" no matter how well it scores on the small test set,
+        # because the test set is itself drawn from the same tiny pool and
+        # over-optimistic. Cap the tier at "acceptable" below this floor.
+        MIN_PAIRS_FOR_GOOD = 2000
+        _n_pairs_for_tier  = (state.get("data_result") or {}).get("n_pairs", 0)
+        if quality_tier == "good" and _n_pairs_for_tier < MIN_PAIRS_FOR_GOOD:
+            logger.info(
+                "quality_tier capped good→acceptable: n_pairs=%d < %d (data-volume floor)",
+                _n_pairs_for_tier, MIN_PAIRS_FOR_GOOD,
+            )
+            quality_tier = "acceptable"
+
         tier_fr = {"good": "Bonne qualité", "acceptable": "Qualité acceptable"}.get(
             quality_tier, "Qualité insuffisante"
         )
@@ -1499,6 +1522,12 @@ async def _tool_evaluate_model(state: OrchestratorState) -> tuple[dict, dict]:
             recommendation = "Objectif atteint — le modèle sera exporté."
         elif quality_tier == "acceptable" and _detect_stagnation(trial_log):
             recommendation = "Qualité acceptable et stagnation détectée — pipeline terminé."
+        elif n_pairs_current < MIN_PAIRS_FOR_GOOD:
+            recommendation = (
+                f"Dataset trop petit ({n_pairs_current} paires < {MIN_PAIRS_FOR_GOOD} requis pour qualité 'good'). "
+                f"Score {primary_metric} ({primary_value:.3f}) ne peut pas être considéré comme fiable. "
+                f"Action prévue : génération de paires supplémentaires (cible : {MIN_PAIRS_FOR_GOOD})."
+            )
         elif n_pairs_current < 300 or primary_value < primary_acceptable * 0.5:
             recommendation = (
                 f"Score {primary_metric} ({primary_value:.3f}) très bas avec {n_pairs_current} paires. "
