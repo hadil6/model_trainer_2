@@ -145,7 +145,6 @@ export default function HistoryPage({
         const st  = statusInfo(run.status);
         const metric = run.primary_metric?.toUpperCase().replace(/_/g, "-") ?? "—";
         const metricVal = run.primary_metric_value;
-        const canChat = run.status === "trained" || run.status === "trained_low_quality";
 
         return (
           <div className="card history-run-card" key={run.job_id}>
