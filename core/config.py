@@ -33,6 +33,11 @@ class Settings(BaseSettings):
         env_file=".env",
         env_file_encoding="utf-8",
         case_sensitive=False,
+        # Allow extra .env keys (e.g. SMTP_*, HPO_*) that are read directly
+        # by other modules via os.environ rather than declared on Settings.
+        # Without this, adding any new var to .env crashes Settings() and
+        # therefore the whole app.
+        extra="ignore",
     )
 
 
