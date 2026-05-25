@@ -93,11 +93,20 @@ def _result_from_disk(job_id: str) -> dict | None:
 
 
 @router.get("")
-async def list_runs() -> JSONResponse:
-    """Return a summary of all completed runs found in the artifacts directory."""
+async def list_runs(owner_email: str | None = None) -> JSONResponse:
+    """Return a summary of completed runs found in the artifacts directory.
+
+    Security: when `owner_email` is provided (query param ?owner_email=...),
+    only runs owned by that user are returned. Runs whose final_output.json
+    has no owner_email (legacy runs created before email isolation existed)
+    are excluded from filtered lists to avoid cross-tenant leakage. Without
+    the parameter, the full list is returned (admin / debugging mode).
+    """
     settings = get_settings()
     artifacts_dir = Path(settings.artifacts_dir)
     runs: list[dict] = []
+
+    requested_email = (owner_email or "").strip().lower() or None
 
     if artifacts_dir.exists():
         for job_dir in sorted(artifacts_dir.iterdir(), key=lambda p: p.stat().st_mtime, reverse=True):
@@ -108,6 +117,13 @@ async def list_runs() -> JSONResponse:
                 continue
             try:
                 data = json.loads(final.read_text(encoding="utf-8"))
+                run_owner = (data.get("owner_email") or "").strip().lower() or None
+
+                # Isolation filter: if caller asked for a specific owner,
+                # skip runs that don't match (and legacy runs with no owner).
+                if requested_email is not None and run_owner != requested_email:
+                    continue
+
                 eval_section   = data.get("evaluation") or {}
                 eval_metrics   = eval_section.get("metrics") or {}
                 selection      = data.get("selected_model") or {}
@@ -128,6 +144,7 @@ async def list_runs() -> JSONResponse:
                     "n_pairs":              n_pairs,
                     "created_at":           job_dir.stat().st_mtime,
                     "summary":              data.get("summary", ""),
+                    "owner_email":          run_owner,
                 })
             except Exception:
                 pass
@@ -145,6 +162,7 @@ async def create_run(
     gpu_vram_gb:  int              = Form(4),
     objective:    str              = Form("balanced"),
     task:         str              = Form(""),
+    owner_email:  str              = Form(""),
 ) -> JSONResponse:
     if not files:
         raise HTTPException(400, "at least one file is required")
@@ -182,9 +200,59 @@ async def create_run(
     settings = get_settings()
     ensure_job_dirs(job_id)
 
+    # ── Security: magic-bytes file validation ───────────────────────────────────
+    # Reject files whose binary signature doesn't match their declared extension.
+    # Protects against:
+    #   - .exe renamed to .pdf (RCE risk if the server ever opened it as native)
+    #   - .zip-bombs renamed to .docx
+    #   - executable scripts disguised as text
+    def _validate_file_signature(filename: str, head: bytes) -> tuple[bool, str]:
+        ext = Path(filename).suffix.lower()
+        if ext == ".pdf":
+            # PDF must start with %PDF- (allow up to 1 KB BOM/leading bytes)
+            if b"%PDF-" in head[:1024]:
+                return True, ""
+            return False, f"{filename}: ext .pdf mais signature PDF absente"
+        if ext == ".docx":
+            # DOCX = ZIP archive, must start with PK\x03\x04 or PK\x05\x06
+            if head[:4] in (b"PK\x03\x04", b"PK\x05\x06", b"PK\x07\x08"):
+                return True, ""
+            return False, f"{filename}: ext .docx mais signature ZIP absente"
+        if ext == ".txt":
+            # TXT must be decodable as UTF-8 (no NULL bytes, no executable headers)
+            if b"\x00" in head[:512]:
+                return False, f"{filename}: ext .txt mais contient des octets NULL (binaire)"
+            # Reject common executable headers explicitly
+            if head[:2] == b"MZ":           # Windows .exe
+                return False, f"{filename}: ext .txt mais signature .exe détectée"
+            if head[:4] == b"\x7fELF":      # Linux .elf
+                return False, f"{filename}: ext .txt mais signature ELF détectée"
+            try:
+                head[:512].decode("utf-8", errors="strict")
+                return True, ""
+            except UnicodeDecodeError:
+                return False, f"{filename}: ext .txt mais contenu non-UTF8"
+        if ext == ".csv":
+            # CSV = text, same rules as TXT
+            if b"\x00" in head[:512]:
+                return False, f"{filename}: ext .csv mais contient des octets NULL"
+            return True, ""
+        # Unknown extension — accept but warn
+        return True, ""
+
     filenames: list[str] = []
     for f in files:
         name = Path(f.filename or "upload.bin").name
+        # Read first 4 KB to inspect signature, then rewind for full save
+        head = f.file.read(4096)
+        f.file.seek(0)
+        ok, err = _validate_file_signature(name, head)
+        if not ok:
+            logger.warning("upload_rejected: %s", err)
+            return JSONResponse(
+                {"error": f"Fichier rejeté : {err}"},
+                status_code=400,
+            )
         dest = input_file_path(job_id, name)
         dest.parent.mkdir(parents=True, exist_ok=True)
         with dest.open("wb") as out:
@@ -200,6 +268,9 @@ async def create_run(
     logging.getLogger().addHandler(handler)
     logging.getLogger().setLevel(logging.INFO)
 
+    # Normalize email to lowercase (case-insensitive identity).
+    _owner_email = (owner_email or "").strip().lower() or None
+
     orchestrator_state: OrchestratorState = {
         "job_id":        job_id,
         "artifact_dir":  str(Path(settings.artifacts_dir) / job_id),
@@ -210,6 +281,7 @@ async def create_run(
         "objective":     objective if objective in ("speed", "balanced", "performance") else "balanced",
         "target_model":  target_model or None,
         "gpu_vram_gb":   gpu_vram_gb,
+        "owner_email":   _owner_email,
         "file_profiles": [],
         "dataset_size":  None,
         "user_intent":   None,

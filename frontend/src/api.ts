@@ -16,12 +16,13 @@ export async function fetchGpuInfo(): Promise<GpuInfo> {
 // ── Run inputs ────────────────────────────────────────────────────────────────
 
 export interface RunInputs {
-  files:     File[];
-  goal:      string;
-  language:  string;
-  objective: string;
-  gpu_vram_gb: number;
-  task?:     string;
+  files:        File[];
+  goal:         string;
+  language:     string;
+  objective:    string;
+  gpu_vram_gb:  number;
+  task?:        string;
+  owner_email?: string;  // attached to the run so /api/runs can filter by owner
 }
 
 export async function startRun(inputs: RunInputs): Promise<string> {
@@ -31,7 +32,8 @@ export async function startRun(inputs: RunInputs): Promise<string> {
   fd.append("language",    inputs.language);
   fd.append("objective",   inputs.objective);
   fd.append("gpu_vram_gb", String(inputs.gpu_vram_gb));
-  if (inputs.task) fd.append("task", inputs.task);
+  if (inputs.task)        fd.append("task",        inputs.task);
+  if (inputs.owner_email) fd.append("owner_email", inputs.owner_email);
 
   const res = await fetch("/api/runs", { method: "POST", body: fd });
   if (!res.ok) {
@@ -309,8 +311,11 @@ export interface RunSummary {
   summary?:             string;
 }
 
-export async function fetchRunHistory(): Promise<RunSummary[]> {
-  const res = await fetch("/api/runs");
+export async function fetchRunHistory(ownerEmail?: string): Promise<RunSummary[]> {
+  const url = ownerEmail
+    ? `/api/runs?owner_email=${encodeURIComponent(ownerEmail)}`
+    : "/api/runs";
+  const res = await fetch(url);
   if (!res.ok) return [];
   const data = await res.json();
   return data.runs ?? [];

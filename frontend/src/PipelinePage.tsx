@@ -1035,7 +1035,11 @@ export default function PipelinePage({
     setImprovementLog([]); setDecisionJournal([]);
     setConfirmPayload(null); setShowAdditionalUpload(false); setAdditionalFiles([]);
     try {
-      const id = await startRun({ files, goal, language, objective, gpu_vram_gb: gpuVram, task });
+      const id = await startRun({
+        files, goal, language, objective,
+        gpu_vram_gb: gpuVram, task,
+        owner_email: user.email,
+      });
       setRunId(id); localStorage.setItem(LS_RUN_KEY, id);
       unsubRef.current = subscribeToRun(id, (e: RunEvent) => {
         if (e.kind === "log") { setSseRetrying(false); setLogs(prev => [...prev, e.data]); }

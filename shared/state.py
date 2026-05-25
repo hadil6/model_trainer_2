@@ -77,6 +77,7 @@ class OrchestratorState(TypedDict, total=False):
     route_count: int
     job_id: str
     gpu_vram_gb: int
+    owner_email: str  # email of the run's owner — used for isolation in /api/runs
 
     # ── Metadata ──────────────────────────────────────────────────────────
     user_intent: Annotated[dict[str, Any], _merge_dicts]

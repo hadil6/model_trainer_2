@@ -36,10 +36,11 @@ export default function HistoryPage({
   const [search,  setSearch]  = useState("");
 
   useEffect(() => {
-    fetchRunHistory()
+    // Pass the current user's email so the backend filters to their own runs.
+    fetchRunHistory(user.email)
       .then(setRuns)
       .finally(() => setLoading(false));
-  }, []);
+  }, [user.email]);
 
   const filtered = runs.filter(r => {
     if (!search.trim()) return true;

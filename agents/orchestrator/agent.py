@@ -1968,6 +1968,7 @@ async def _finalize(state: OrchestratorState) -> dict:
 
     output = {
         "job_id":            state["job_id"],
+        "owner_email":       state.get("owner_email"),  # used by /api/runs isolation filter
         "status":            finish_status,
         "summary":           finish_summary,
         "task":              intent.get("task"),
