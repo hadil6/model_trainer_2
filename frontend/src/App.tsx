@@ -7,6 +7,7 @@ import { FloatingMLBackground, NeuralNetPageBackground } from "./MLDecorations";
 export interface UserProfile {
   nom: string;
   prenom: string;
+  email: string;
   isExpert: boolean;
 }
 

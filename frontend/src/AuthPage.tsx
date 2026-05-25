@@ -2,18 +2,32 @@ import { useState } from "react";
 import type { UserProfile } from "./App";
 import { NeuralNetDecoration, FloatingMLBackground, NeuralNetPageBackground } from "./MLDecorations";
 
+// RFC 5322 simplified email regex — accepts standard formats, rejects obvious garbage.
+const EMAIL_REGEX = /^[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}$/;
+
 export default function AuthPage({ onLogin }: { onLogin: (u: UserProfile) => void }) {
   const [prenom, setPrenom]       = useState("");
   const [nom,    setNom]          = useState("");
+  const [email,  setEmail]        = useState("");
   const [isExpert, setIsExpert]   = useState<boolean | null>(null);
   const [error,  setError]        = useState("");
 
   function handleSubmit() {
     if (!prenom.trim()) { setError("Veuillez entrer votre prénom."); return; }
     if (!nom.trim())    { setError("Veuillez entrer votre nom."); return; }
+    if (!email.trim())  { setError("Veuillez entrer votre adresse email."); return; }
+    if (!EMAIL_REGEX.test(email.trim())) {
+      setError("Adresse email invalide (ex. : prenom.nom@example.com).");
+      return;
+    }
     if (isExpert === null) { setError("Veuillez sélectionner votre profil."); return; }
     setError("");
-    onLogin({ prenom: prenom.trim(), nom: nom.trim(), isExpert });
+    onLogin({
+      prenom: prenom.trim(),
+      nom:    nom.trim(),
+      email:  email.trim().toLowerCase(),
+      isExpert,
+    });
   }
 
   return (
@@ -61,6 +75,18 @@ export default function AuthPage({ onLogin }: { onLogin: (u: UserProfile) => voi
               value={nom}
               onChange={e => setNom(e.target.value)}
               onKeyDown={e => e.key === "Enter" && handleSubmit()}
+            />
+          </label>
+
+          <label className="field">
+            <span>Email</span>
+            <input
+              type="email"
+              placeholder="Ex. : prenom.nom@example.com"
+              value={email}
+              onChange={e => setEmail(e.target.value)}
+              onKeyDown={e => e.key === "Enter" && handleSubmit()}
+              autoComplete="email"
             />
           </label>
         </div>
@@ -113,7 +139,7 @@ export default function AuthPage({ onLogin }: { onLogin: (u: UserProfile) => voi
           className="run-btn"
           style={{ width: "100%", marginTop: 20, fontSize: 16 }}
           onClick={handleSubmit}
-          disabled={!prenom || !nom || isExpert === null}
+          disabled={!prenom || !nom || !email || isExpert === null}
         >
           Commencer →
         </button>
