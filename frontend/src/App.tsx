@@ -16,6 +16,14 @@ export default function App() {
   const [user, setUser] = useState<UserProfile | null>(null);
 
   function handleLogin(u: UserProfile) {
+    // Wipe any leftover run state from a previous session so the user lands
+    // on a clean Pipeline page (no old completed run, no in-flight job_id).
+    // We only clear keys we own, never the browser's other data.
+    try {
+      localStorage.removeItem("completed_run_id");
+      localStorage.removeItem("active_run_id");
+    } catch { /* localStorage may be disabled — silent */ }
+
     setUser(u);
     setPage("pipeline");
     // Fire-and-forget login notification — never blocks the UI.
@@ -32,6 +40,13 @@ export default function App() {
   }
 
   function handleLogout() {
+    // Same cleanup as on login: the next user (or even the same user
+    // signing back in) must start from a blank Pipeline page.
+    try {
+      localStorage.removeItem("completed_run_id");
+      localStorage.removeItem("active_run_id");
+    } catch { /* localStorage may be disabled — silent */ }
+
     setUser(null);
     setPage("auth");
   }
