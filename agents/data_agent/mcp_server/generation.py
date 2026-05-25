@@ -361,14 +361,24 @@ def tool_auto_fill_qa_preview(
 
 def tool_auto_fill_qa(
     job_id: str, target_model: str, task: str, target_peft: str = "qlora",
-    model_id: str = "",
+    model_id: str = "", target_count_override: int = 0,
 ) -> dict:
     """Generate extra pairs until the model-specific target count is reached.
     For summarization: generates (document→summary) pairs.
     For other tasks: generates Q&A pairs with varied styles (conceptual/applied/analytical).
-    Appends directly to qa_final.jsonl."""
+    Appends directly to qa_final.jsonl.
+
+    target_count_override : when > 0, overrides the model-specific default
+        target from get_requirements(). Used by the orchestrator to enforce
+        a higher floor (e.g. 2000) when the user explicitly demands it.
+    """
     req = get_requirements(target_model, target_peft, task)
-    target_count = req["target"]
+    target_count = max(req["target"], int(target_count_override or 0))
+    if target_count_override and target_count_override > req["target"]:
+        logger.info(
+            "auto_fill_qa: target overridden from %d to %d by orchestrator",
+            req["target"], target_count,
+        )
 
     current_raw = read_jsonl(qa_final_path(job_id))
     if not current_raw:

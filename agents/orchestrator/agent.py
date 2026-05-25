@@ -1228,11 +1228,17 @@ async def _tool_auto_fill_qa(state: OrchestratorState, args: dict) -> tuple[dict
             return {"refused": True, "message": msg}, {"error": msg}
 
     # ── User approved (or no handle / timeout) — proceed with auto-fill ──────
+    # Propagate the orchestrator's target_pairs (already raised to the 2000
+    # floor) to the data agent so it doesn't fall back to its own model-default
+    # of 300.
     loop = asyncio.get_event_loop()
     fill = await loop.run_in_executor(
         None,
-        lambda: tool_auto_fill_qa(job_id=job_id, target_model=target_model,
-                                   task=task, target_peft=peft_method),
+        lambda: tool_auto_fill_qa(
+            job_id=job_id, target_model=target_model,
+            task=task, target_peft=peft_method,
+            target_count_override=target_pairs,
+        ),
     )
     export = await loop.run_in_executor(
         None,
