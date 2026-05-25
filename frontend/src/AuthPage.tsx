@@ -55,30 +55,8 @@ export default function AuthPage({ onLogin }: { onLogin: (u: UserProfile) => voi
         <h2 className="auth-title">Créer votre profil</h2>
         <p className="auth-subtitle">Ces informations permettent de personnaliser votre expérience.</p>
 
-        <div className="auth-fields">
-          <label className="field">
-            <span>Prénom</span>
-            <input
-              type="text"
-              placeholder="Ex. : Hadil"
-              value={prenom}
-              onChange={e => setPrenom(e.target.value)}
-              onKeyDown={e => e.key === "Enter" && handleSubmit()}
-            />
-          </label>
-
-          <label className="field">
-            <span>Nom</span>
-            <input
-              type="text"
-              placeholder="Ex. : Souilem"
-              value={nom}
-              onChange={e => setNom(e.target.value)}
-              onKeyDown={e => e.key === "Enter" && handleSubmit()}
-            />
-          </label>
-
-          <label className="field">
+        <div className="auth-fields" style={{ gap: 10, marginBottom: 16 }}>
+          <label className="field" style={{ gap: 4 }}>
             <span>Email</span>
             <input
               type="email"
@@ -87,6 +65,30 @@ export default function AuthPage({ onLogin }: { onLogin: (u: UserProfile) => voi
               onChange={e => setEmail(e.target.value)}
               onKeyDown={e => e.key === "Enter" && handleSubmit()}
               autoComplete="email"
+            />
+          </label>
+
+          <label className="field" style={{ gap: 4 }}>
+            <span>Nom</span>
+            <input
+              type="text"
+              placeholder="Ex. : Souilem"
+              value={nom}
+              onChange={e => setNom(e.target.value)}
+              onKeyDown={e => e.key === "Enter" && handleSubmit()}
+              autoComplete="family-name"
+            />
+          </label>
+
+          <label className="field" style={{ gap: 4 }}>
+            <span>Prénom</span>
+            <input
+              type="text"
+              placeholder="Ex. : Hadil"
+              value={prenom}
+              onChange={e => setPrenom(e.target.value)}
+              onKeyDown={e => e.key === "Enter" && handleSubmit()}
+              autoComplete="given-name"
             />
           </label>
         </div>
