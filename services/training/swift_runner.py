@@ -169,16 +169,21 @@ def run(
     # Rule 1 / Rule 3 fire long after the divergence had already happened.
     swift_env["PYTHONUNBUFFERED"] = "1"
     # Each invocation of swift_runner.run() gets a UNIQUE HF datasets cache
-    # directory (timestamp + uuid suffix) so the previous run's memory-mapped
-    # Arrow file (which Windows refuses to release for ~minutes after the
-    # subprocess exits) doesn't block the next dataset.map() with
-    # `OSError: [WinError 1224]`. This protects both inter-trial collisions
-    # (HPO) AND inter-iteration collisions (orchestrator corrective retries).
-    # Cost: ~30 s extra tokenization per run.
+    # directory (timestamp + uuid suffix) AND we disable the on-disk cache
+    # entirely, because on Windows the Arrow file ends up memory-mapped and
+    # the OS refuses to release it for minutes after the subprocess exits,
+    # breaking every subsequent dataset.map() with WinError 1224.
+    #
+    # HF_DATASETS_DISABLE_CACHING=1 forces datasets.config to skip writing
+    # the .arrow cache file altogether — the dataset stays in RAM only.
+    # This adds ~30 s of re-tokenization per run but guarantees no mmap
+    # collision between trials or iterations.
     import time as _time
     import uuid as _uuid
     _cache_suffix = f"{int(_time.time() * 1000)}_{_uuid.uuid4().hex[:8]}"
     swift_env["HF_DATASETS_CACHE"] = str(output_dir / f"_hf_datasets_cache_{_cache_suffix}")
+    swift_env["HF_DATASETS_DISABLE_CACHING"] = "1"
+    swift_env["HF_DATASETS_IN_MEMORY_MAX_SIZE"] = "0"
 
     try:
         proc = subprocess.Popen(

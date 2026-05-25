@@ -33,22 +33,20 @@ from data.artifact_store import ensure_job_dirs, write_json
 logger = logging.getLogger(__name__)
 
 def _compute_hard_max_iterations() -> int:
-    """Hard cap on corrective iterations. Lower on Windows + small GPU to avoid
-    retry loops triggered by Windows-specific Arrow cache mmap conflicts."""
+    """Hard cap on corrective iterations.
+
+    With HF_DATASETS_DISABLE_CACHING=1 (commit a7c5fd...) the Windows
+    WinError 1224 cache-mmap conflict is no longer a concern, so we can
+    safely allow real corrective loops on every platform. The user
+    expects the pipeline to KEEP TRYING until quality reaches at least
+    "acceptable" tier.
+    """
     import os
     if os.environ.get("HARD_MAX_ITERATIONS"):
         try:
             return int(os.environ["HARD_MAX_ITERATIONS"])
         except ValueError:
             pass
-    try:
-        import platform, torch as _torch
-        if (platform.system() == "Windows"
-                and _torch.cuda.is_available()
-                and _torch.cuda.get_device_properties(0).total_memory / 1e9 < 6.0):
-            return 2
-    except Exception:
-        pass
     return 10
 
 
@@ -1102,9 +1100,21 @@ async def _tool_auto_fill_qa(state: OrchestratorState, args: dict) -> tuple[dict
     task         = intent.get("task", "question-answering")
     target_model = selection.get("model_id") or state.get("target_model") or ""
     peft_method  = selection.get("peft_method") or "qlora"
-    target_pairs = int(args.get("target_pairs", 500))
+    requested_target = int(args.get("target_pairs", 500))
     current_pairs = int((state.get("data_result") or {}).get("n_pairs", 0))
     llm_reasoning = (args.get("reasoning") or "").strip()
+
+    # Hard floor: never auto-fill to less than 2000 pairs. The user
+    # explicitly requires this minimum for a fine-tuning to be considered
+    # potentially "good" quality. The LLM sometimes proposes tiny targets
+    # like 5 (which is the preview sample size) or 500 — we override.
+    MIN_AUTO_FILL_TARGET = 2000
+    target_pairs = max(requested_target, MIN_AUTO_FILL_TARGET, current_pairs + 500)
+    if target_pairs != requested_target:
+        logger.info(
+            "auto_fill_qa: target_pairs raised from %d to %d (floor=%d, current=%d)",
+            requested_target, target_pairs, MIN_AUTO_FILL_TARGET, current_pairs,
+        )
 
     if not llm_reasoning:
         err = {
