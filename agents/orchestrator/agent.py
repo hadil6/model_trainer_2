@@ -1691,6 +1691,13 @@ async def _react_agent(state: OrchestratorState) -> dict:
     messages = list(state.get("messages") or [])
     system   = _build_system_prompt(state)
 
+    # If the previous routing detected an empty tool_calls response and the
+    # pipeline is incomplete, inject an explicit nudge into the system prompt
+    # to force the LLM to choose the next missing step.
+    nudge = state.pop("_nudge", None) if isinstance(state, dict) else None
+    if nudge:
+        system = f"{system}\n\n{nudge}"
+
     response = get_llm_client().call_with_tools(
         messages=messages,
         tools=PIPELINE_TOOLS,
@@ -2036,6 +2043,40 @@ def _route_after_agent(state: OrchestratorState) -> str:
     tool_calls = last.get("tool_calls", [])
 
     if not tool_calls:
+        # LLM hallucinated an empty response — common after long context
+        # (e.g. just after auto_fill_qa returns thousands of QA samples).
+        # Before giving up, check whether the pipeline is ACTUALLY done.
+        # If essential steps are missing we re-route to the agent with a
+        # nudge in the state so it retries with explicit guidance.
+        data        = state.get("data_result") or {}
+        selection   = state.get("selection_result") or {}
+        training    = state.get("training_result") or {}
+        evaluation  = state.get("evaluation_result") or {}
+        retries     = int(state.get("empty_tool_calls_retries", 0))
+
+        pipeline_actually_done = bool(
+            evaluation.get("metrics")
+            or (state.get("final_output") or {}).get("status")
+        )
+
+        if not pipeline_actually_done and retries < 2:
+            state["empty_tool_calls_retries"] = retries + 1
+            missing = []
+            if not data.get("n_pairs"):       missing.append("prepare_data")
+            if not selection.get("model_id"): missing.append("select_model")
+            if not training.get("success"):   missing.append("train_model")
+            if not evaluation.get("metrics"): missing.append("evaluate_model")
+            state["_nudge"] = (
+                f"⚠ Tu n'as appelé aucun outil. Le pipeline n'est PAS terminé. "
+                f"Étapes encore à faire : {', '.join(missing)}. "
+                f"Appelle MAINTENANT le prochain outil approprié."
+            )
+            logger.warning(
+                "react_agent empty tool_calls (retry %d/2) — nudging with missing=%s",
+                retries + 1, missing,
+            )
+            return "react_agent"
+
         return "finalize"
 
     # If LLM called finish → skip tool_executor, go straight to finalize
