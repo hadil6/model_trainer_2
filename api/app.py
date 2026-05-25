@@ -5,7 +5,7 @@ from __future__ import annotations
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-from api.routes import chat, datasets, eval, gpu, reports, runs, training_images
+from api.routes import chat, datasets, eval, gpu, notifications, reports, runs, training_images
 
 
 def create_app() -> FastAPI:
@@ -25,6 +25,7 @@ def create_app() -> FastAPI:
     app.include_router(reports.router)
     app.include_router(training_images.router)
     app.include_router(gpu.router)
+    app.include_router(notifications.router)
 
     @app.get("/api/health")
     async def health() -> dict[str, str]:

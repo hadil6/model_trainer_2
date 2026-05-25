@@ -18,6 +18,17 @@ export default function App() {
   function handleLogin(u: UserProfile) {
     setUser(u);
     setPage("pipeline");
+    // Fire-and-forget login notification — never blocks the UI.
+    fetch("/api/notify/login", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        email:     u.email,
+        prenom:    u.prenom,
+        nom:       u.nom,
+        is_expert: u.isExpert,
+      }),
+    }).catch(() => { /* silent — email is non-critical */ });
   }
 
   function handleLogout() {

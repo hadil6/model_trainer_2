@@ -1983,6 +1983,29 @@ async def _finalize(state: OrchestratorState) -> dict:
         "error":             state.get("error"),
     }
     write_json(Path(state["artifact_dir"]) / "final_output.json", output)
+
+    # ── Email the owner that their pipeline finished — best effort, non-blocking ─
+    _owner_email = state.get("owner_email")
+    if _owner_email:
+        try:
+            from services.email_notifier import send_pipeline_completion
+            _eval_metrics  = (eval_res or {}).get("metrics") or {}
+            _primary       = _eval_metrics.get("primary_metric", "rouge1")
+            _primary_value = _eval_metrics.get(_primary)
+            _n_pairs       = (data or {}).get("n_pairs") or ((data or {}).get("splits") or {}).get("total")
+            send_pipeline_completion(
+                email=_owner_email,
+                prenom=(state.get("user_profile") or {}).get("prenom") or _owner_email.split("@")[0],
+                job_id=state["job_id"],
+                status=finish_status,
+                model_id=(selection or {}).get("model_id", "unknown"),
+                primary_metric=_primary,
+                primary_value=_primary_value,
+                n_pairs=_n_pairs,
+            )
+        except Exception as _ee:
+            logger.warning("pipeline_completion_email_failed: %s", _ee)
+
     return {"final_output": output}
 
 
