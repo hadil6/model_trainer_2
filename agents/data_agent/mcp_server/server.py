@@ -71,10 +71,14 @@ async def _async_generate_qa(
 
 @functools.wraps(tool_auto_fill_qa)
 async def _async_auto_fill_qa(
-    job_id: str, target_model: str, task: str, target_peft: str = "qlora", model_id: str = ""
+    job_id: str, target_model: str, task: str, target_peft: str = "qlora",
+    model_id: str = "", target_count_override: int = 0,
 ) -> dict:
     return await anyio.to_thread.run_sync(
-        lambda: tool_auto_fill_qa(job_id, target_model, task, target_peft, model_id)
+        lambda: tool_auto_fill_qa(
+            job_id, target_model, task, target_peft, model_id,
+            target_count_override=target_count_override,
+        )
     )
 
 
