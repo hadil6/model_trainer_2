@@ -2062,9 +2062,17 @@ def _route_after_agent(state: OrchestratorState) -> str:
         if not pipeline_actually_done and retries < 2:
             state["empty_tool_calls_retries"] = retries + 1
             missing = []
+            # `training_result` is the report dict returned by run_hpo/run_training:
+            #   {"hparams": ..., "result": {"success": True, "metrics": ...}, ...}
+            # The "success" flag lives one level down under "result", so we must
+            # dig in — otherwise we falsely report train_model as missing right
+            # after it has just succeeded, confusing the LLM's retry.
+            training_inner = (training.get("result") or {}) if isinstance(training, dict) else {}
+            training_ok    = bool(training_inner.get("success") or training.get("hparams"))
+
             if not data.get("n_pairs"):       missing.append("prepare_data")
             if not selection.get("model_id"): missing.append("select_model")
-            if not training.get("success"):   missing.append("train_model")
+            if not training_ok:                missing.append("train_model")
             if not evaluation.get("metrics"): missing.append("evaluate_model")
             state["_nudge"] = (
                 f"⚠ Tu n'as appelé aucun outil. Le pipeline n'est PAS terminé. "
@@ -2138,6 +2146,12 @@ def _build_graph() -> StateGraph:
         "react_agent",
         _route_after_agent,
         {
+            # _route_after_agent can return "react_agent" itself when the LLM
+            # produced empty tool_calls and the retry-nudge logic wants to
+            # re-enter the agent. Without this mapping entry LangGraph throws
+            # KeyError: 'react_agent' the first time a nudge fires (typically
+            # after long contexts at the end of multi-trial HPO runs).
+            "react_agent":   "react_agent",
             "tool_executor": "tool_executor",
             "finalize":      "finalize",
         },
